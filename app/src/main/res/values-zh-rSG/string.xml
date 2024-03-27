@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CitrusKDS</string>
+    <string name="error_occurred">An error occurred</string>
+
+    <string name="error_no_location">No location available</string>
+
+    <string name="main">主页</string>
+    <string name="served">已完成</string>
+    <string name="recall">召回</string>
+    <string name="basic_setting">机台设定</string>
+    <string name="connect_params">连接参数</string>
+    <string name="printer_params">打印参数</string>
+    <string name="language_params">系统语言</string>
+    <string name="language_params_tint">请选择系统语言</string>
+    <string name="page_params">预设页面</string>
+    <string name="page_params_tint">请选择预设页面</string>
+    <string name="no_data">尚无订单资料</string>
+    <string name="view_all">检视全单 (%s)</string>
+    <string name="finish">完成</string>
+    <string name="search_order">搜索订单</string>
+    <string name="set_stock">设置库存</string>
+    <string name="search_item">搜索品项</string>
+    <string name="setting">系统设定</string>
+    <string name="collected">已取餐</string>
+    <string name="data_fetch_error">资料捞取失败</string>
+    <string name="http_error">连线发生问题</string>
+    <string name="no_internet_error">当前无网路连线</string>
+    <string name="the_request_timed_out">连线逾时</string>
+    <string name="json_serialization_error">Json解析错误</string>
+    <string name="server_error">伺服器发生错误</string>
+    <string name="unknown_error">发生未知的错误</string>
+    <string name="no_result">没有匹配的搜寻结果</string>
+    <string name="please_select_type">请选择品项分类</string>
+    <string name="select_type">选择分类</string>
+    <string name="stock_qty">库存数量</string>
+    <string name="confirm">OK</string>
+    <string name="printer">打印机</string>
+    <string name="printer_params_tint">请选择打印机</string>
+    <string name="item_present_language">订单品项显示语言</string>
+    <string name="order_time">点单时间:</string>
+    <string name="print_time">打印时间:</string>
+    <string name="no">单号 </string>
+    <string name="system_mode">系统模式</string>
+    <string name="category">类别 </string>
+    <string name="reprint">重印</string>
+    <string name="verify">验证</string>
+    <string name="cancel">取消</string>
+    <string name="verify_hint">请提供系统商以下安全码</string>
+    <string name="version">版本号</string>
+    <string name="version_update">版本更新</string>
+    <string name="download">下载</string>
+    <string name="download_hint">版本号</string>
+
+
+    <string name="handlingmsg_warn_receipt_near_end">Roll paper is nearly end.\n</string>
+    <string name="handlingmsg_warn_battery_near_end">Battery level of printer is low.\n</string>
+    <string name="handlingmsg_warn_detect_paper">Please take the receipt.\n</string>
+    <string name="handlingmsg_warn_detect_unknown">Please check if not ambient light reaches paper outlet and if paper taken sensor status in the printer is enable if you need to use paper taken sensor status.\n</string>
+    <string name="handlingmsg_err_no_response">Please check the connection of the printer and the mobile terminal.\nConnection get lost.\n</string>
+    <string name="handlingmsg_err_cover_open">Please close roll paper cover.\n</string>
+    <string name="handlingmsg_err_receipt_end">Please check roll paper.\n</string>
+    <string name="handlingmsg_err_paper_feed">Please release a paper feed switch.\n</string>
+    <string name="handlingmsg_err_autocutter">Please remove jammed paper and close roll paper cover.\nRemove any jammed paper or foreign substances in the printer, and then turn the printer off and turn the printer on again.\n</string>
+    <string name="handlingmsg_err_need_recover">Then, If the printer doesn\'t recover from error, please cycle the power switch.\n</string>
+    <string name="handlingmsg_err_unrecover">Please cycle the power switch of the printer.\nIf same errors occurred even power cycled, the printer may out of order.</string>
+    <string name="handlingmsg_err_overheat">Please wait until error LED of the printer turns off. \n</string>
+    <string name="handlingmsg_err_head">Print head of printer is hot.\n</string>
+    <string name="handlingmsg_err_motor">Motor Driver IC of printer is hot.\n</string>
+    <string name="handlingmsg_err_battery">Battery of printer is hot.\n</string>
+    <string name="handlingmsg_err_wrong_paper">Please set correct roll paper.\n</string>
+    <string name="handlingmsg_err_battery_real_end">Please connect AC adapter or change the battery.\nBattery of printer is almost empty.\n</string>
+    <string name="handlingmsg_err_offline">Printer is offline.\n</string>
+    <string name="handlingmsg_err_wait_removal">Please remove paper.\n</string>
+    <string name="handlingmsg_err_voltage">Please check the voltage status.\n</string>
+
+</resources>
