@@ -18,6 +18,8 @@
     <string name="no_data">尚无订单资料</string>
     <string name="view_all">检视全单 (%s)</string>
     <string name="finish">完成</string>
+    <string name="prepare">新单</string>
+    <string name="preparing">处理中</string>
     <string name="search_order">搜索订单</string>
     <string name="set_stock">设置库存</string>
     <string name="search_item">搜索品项</string>
@@ -51,6 +53,8 @@
     <string name="version_update">版本更新</string>
     <string name="download">下载</string>
     <string name="download_hint">版本号</string>
+    <string name="kitchen_order">厨房单打印</string>
+    <string name="is_prepare_status_enable">准备状态是否启用</string>
 
 
     <string name="handlingmsg_warn_receipt_near_end">Roll paper is nearly end.\n</string>

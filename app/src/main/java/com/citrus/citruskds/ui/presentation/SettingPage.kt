@@ -115,6 +115,8 @@ private fun ConnectParams(
     val invalidScreen = remember { mutableFloatStateOf(1f) }
     var securityManager by remember { mutableStateOf(false) }
 
+    var isPrinterSelectVisible by remember { mutableStateOf(prefs.printMode == 0) }
+
     LaunchedEffect(state.languageState) {
         invalidScreen.floatValue = if (invalidScreen.floatValue == 1f) 0.99f else 1f
     }
@@ -261,53 +263,78 @@ private fun ConnectParams(
                     }
                 }
                 Spacer(modifier = Modifier.height(10.dp))
+
                 Text(
-                    text = stringResource(id = R.string.printer),
+                    text = stringResource(id = R.string.is_prepare_status_enable),
                     fontSize = 14.sp,
                     color = ColorBlue
                 )
-                ExposedDropdownMenuBox(
-                    expanded = isExpanded2.value,
-                    onExpandedChange = { newValue ->
-                        isExpanded2.value = newValue
-                    }
-                ) {
-                    TextInputField(
-                        textFieldValue = state.printerState,
-                        placeholder = stringResource(id = R.string.printer_params_tint),
-                        readOnly = true,
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = isExpanded2.value)
-                        },
-                        enabled = false,
-                        modifier = Modifier
-                            .padding(bottom = 20.dp)
-                            .menuAnchor()
-                    )
+                PrepareRadio {
+                    event(CentralContract.Event.onPrepareModeChanged(it))
+                }
 
-                    ExposedDropdownMenu(
+                Text(
+                    text = stringResource(id = R.string.kitchen_order),
+                    fontSize = 14.sp,
+                    color = ColorBlue
+                )
+                PrintRadio {
+                    isPrinterSelectVisible = it == 0
+                    event(CentralContract.Event.onPrintModeChanged(it))
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (isPrinterSelectVisible) {
+                    Text(
+                        text = stringResource(id = R.string.printer),
+                        fontSize = 14.sp,
+                        color = ColorBlue
+                    )
+                    ExposedDropdownMenuBox(
                         expanded = isExpanded2.value,
-                        onDismissRequest = {
-                            isExpanded2.value = false
+                        onExpandedChange = { newValue ->
+                            isExpanded2.value = newValue
                         }
                     ) {
-                        state.printerInfo?.forEach { info ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = (info["PrinterName"]
-                                            ?: "") + " " + (info["Target"]
-                                            ?: "")
-                                    )
-                                },
-                                onClick = {
-                                    event(CentralContract.Event.OnPrinterSelected(info))
-                                    isExpanded2.value = false
-                                }
-                            )
+                        TextInputField(
+                            textFieldValue = state.printerState,
+                            placeholder = stringResource(id = R.string.printer_params_tint),
+                            readOnly = true,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = isExpanded2.value)
+                            },
+                            enabled = false,
+                            modifier = Modifier
+                                .padding(bottom = 20.dp)
+                                .menuAnchor()
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = isExpanded2.value,
+                            onDismissRequest = {
+                                isExpanded2.value = false
+                            }
+                        ) {
+                            state.printerInfo?.forEach { info ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = (info["PrinterName"]
+                                                ?: "") + " " + (info["Target"]
+                                                ?: "")
+                                        )
+                                    },
+                                    onClick = {
+                                        event(CentralContract.Event.OnPrinterSelected(info))
+                                        isExpanded2.value = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
+
 
                 Text(
                     text = stringResource(id = R.string.system_mode),
@@ -384,6 +411,102 @@ private fun ConnectParams(
 
 
 @Composable
+fun PrepareRadio(modeChanged: (Boolean) -> Unit = {}) {
+    val radioOptions = listOf("Yes", "No")
+    val (selectedOption, onOptionSelected) = remember(prefs.isPrepareEnable) {
+        mutableStateOf(
+            radioOptions[if (prefs.isPrepareEnable) 0 else 1]
+        )
+    }
+    Row(modifier = Modifier.fillMaxWidth()) {
+        radioOptions.forEach { text ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+                modifier =
+                Modifier
+                    .selectable(
+                        selected = (text == selectedOption),
+                        onClick = {
+                            onOptionSelected(text)
+                            Timber.d("selectedOption: $text")
+                            val mode =
+                                text == "Yes"
+                            modeChanged(mode)
+                        }
+                    )
+
+            ) {
+                RadioButton(
+                    selected = (text == selectedOption),
+                    onClick = {
+                        onOptionSelected(text)
+                        val mode =
+                            text == "Yes"
+                        modeChanged(mode)
+                    }
+                )
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium.merge(),
+                )
+
+            }
+        }
+    }
+}
+
+@Composable
+fun PrintRadio(modeChanged: (Int) -> Unit = {}) {
+    val radioOptions = listOf("Yes", "No")
+    val (selectedOption, onOptionSelected) = remember(prefs.printMode) { mutableStateOf(radioOptions[prefs.printMode]) }
+    Row(modifier = Modifier.fillMaxWidth()) {
+        radioOptions.forEach { text ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+                modifier =
+                Modifier
+                    .selectable(
+                        selected = (text == selectedOption),
+                        onClick = {
+                            onOptionSelected(text)
+                            Timber.d("selectedOption: $text")
+                            val mode =
+                                if (text == "Yes") {
+                                    0
+                                } else {
+                                    1
+                                }
+                            modeChanged(mode)
+                        }
+                    )
+
+            ) {
+                RadioButton(
+                    selected = (text == selectedOption),
+                    onClick = {
+                        onOptionSelected(text)
+                        val mode =
+                            if (text == "Yes") {
+                                0
+                            } else {
+                                1
+                            }
+                        modeChanged(mode)
+                    }
+                )
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium.merge(),
+                )
+
+            }
+        }
+    }
+}
+
+@Composable
 fun ModeRadio(modeChanged: (Int) -> Unit = {}) {
     val radioOptions = listOf("KDS", "OrderReady")
     val (selectedOption, onOptionSelected) = remember(prefs.mode) { mutableStateOf(radioOptions[prefs.mode]) }
@@ -417,7 +540,7 @@ fun ModeRadio(modeChanged: (Int) -> Unit = {}) {
                     selected = (text == selectedOption),
                     onClick = {
                         if (prefs.localIp.isEmpty()) {
-                           return@RadioButton
+                            return@RadioButton
                         }
                         onOptionSelected(text)
                         val mode =
@@ -433,8 +556,6 @@ fun ModeRadio(modeChanged: (Int) -> Unit = {}) {
                     text = text,
                     style = MaterialTheme.typography.bodyMedium.merge(),
                 )
-
-                Spacer(modifier = Modifier.width(100.dp))
             }
         }
     }

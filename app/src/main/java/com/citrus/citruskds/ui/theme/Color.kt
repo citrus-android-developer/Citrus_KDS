@@ -39,6 +39,7 @@ val BlueG40 = Color(0xFF52537D)
 
 val ColorPrimaryDart = Color(0xFF64593B)
 
+
 val ColorTextPrimaryColor = Color(0xFF3F3E3E)
 
 

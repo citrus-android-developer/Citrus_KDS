@@ -18,6 +18,7 @@ import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.domain.ApiRepositoryImpl
 import com.citrus.citruskds.util.BaseViewModel
 import com.citrus.citruskds.util.InputStateWrapper
+import com.citrus.citruskds.util.PrintStatus
 import com.citrus.citruskds.util.PrinterDetecter
 import com.citrus.citruskds.util.asUiText
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -60,6 +61,14 @@ class CentralViewModel @Inject constructor(
             printerDetecter.scannerValue.collectLatest {
                 setState {
                     copy(printerInfo = it)
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            printerDetecter.printStatus.collectLatest {
+                setState {
+                    copy(printStatus = it)
                 }
             }
         }
@@ -201,9 +210,17 @@ class CentralViewModel @Inject constructor(
 
     override fun handleEvent(event: CentralContract.Event) {
         when (event) {
+            is CentralContract.Event.onPrepareModeChanged -> {
+                prefs.isPrepareEnable = event.mode
+            }
+
+            is CentralContract.Event.onPrintModeChanged -> {
+                prefs.printMode = event.mode
+            }
+
             is CentralContract.Event.onDismissErrorDialog -> {
                 setState {
-                    copy(errMsg = null)
+                    copy(errMsg = null, printStatus = PrintStatus.Idle)
                 }
             }
 
@@ -286,9 +303,29 @@ class CentralViewModel @Inject constructor(
             /**Main Finish按鍵觸發*/
             is CentralContract.Event.FinishOrder -> {
                 Timber.d("FinishOrder: ${event.order.orderNo}")
+                if (currentState.printStatus != PrintStatus.Idle) {
+                    return
+                }
                 setOrderStatus(orderNo = event.order.orderNo, status = event.status)
+
+                if (prefs.printMode == 1) {
+                    setState {
+                        copy(printOrder = event.order)
+                    }
+                }
+            }
+
+            is CentralContract.Event.ProgressOrder -> {
+                setOrderStatus(orderNo = event.order.orderNo, status = event.status)
+
                 setState {
-                    copy(printOrder = event.order)
+                    copy(mainList = currentState.mainList?.map {
+                        if (it.orderNo == event.order.orderNo) {
+                            it.copy(status = "W")
+                        } else {
+                            it
+                        }
+                    })
                 }
             }
 
@@ -363,9 +400,16 @@ class CentralViewModel @Inject constructor(
 
             /**重印廚房單*/
             is CentralContract.Event.ReprintOrder -> {
-                setState {
-                    Timber.d("Printer issue trace: step 1")
-                    copy(printOrder = event.order)
+                if (currentState.printStatus != PrintStatus.Idle) {
+                    return
+                }
+
+
+                if (prefs.printMode == 1) {
+                    setState {
+                        Timber.d("Printer issue trace: step 1")
+                        copy(printOrder = event.order)
+                    }
                 }
             }
         }

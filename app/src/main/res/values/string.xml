@@ -18,6 +18,8 @@
     <string name="no_data">No order information yet</string>
     <string name="view_all">VIEW ALL (%s)</string>
     <string name="finish">FINISH</string>
+    <string name="prepare">NEW</string>
+    <string name="preparing">PREPARING</string>
     <string name="search_order">Search Order</string>
     <string name="search_item">Search Item</string>
     <string name="set_stock">SetStock</string>
@@ -51,6 +53,9 @@
     <string name="version_update">Version Update</string>
     <string name="download">Download</string>
     <string name="download_hint">Version Number</string>
+    <string name="kitchen_order">Print Kitchen Order</string>
+    <string name="is_prepare_status_enable">Is Prepare Status Enable</string>
+
 
     <string name="handlingmsg_warn_receipt_near_end">Roll paper is nearly end.\n</string>
     <string name="handlingmsg_warn_battery_near_end">Battery level of printer is low.\n</string>

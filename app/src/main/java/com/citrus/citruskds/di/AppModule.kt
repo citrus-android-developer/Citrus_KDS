@@ -8,6 +8,8 @@ import com.citrus.citruskds.util.Prefs
 import com.citrus.citruskds.commonData.ApiService
 import com.citrus.citruskds.util.Constants
 import com.citrus.citruskds.util.Constants.sha3_256
+import com.citrus.citruskds.util.PrintUtil
+import com.citrus.citruskds.util.PrinterDetecter
 import com.squareup.moshi.KotlinJsonAdapterFactory
 import com.squareup.moshi.Moshi
 import dagger.Module
@@ -78,6 +80,15 @@ interface AppModule {
         @Singleton
         fun providePref(application: Application): Prefs =
             Prefs(application)
+
+
+        @Provides
+        @Singleton
+        fun providePrintUtil(
+            application: Application,
+            printerDetecter: PrinterDetecter
+        ): PrintUtil =
+            PrintUtil(application, printerDetecter)
 
         @Provides
         @Singleton

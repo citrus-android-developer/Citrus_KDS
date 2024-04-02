@@ -51,6 +51,14 @@ import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.widget.ErrorDialog
 import com.citrus.citruskds.ui.theme.ColorPrimary
+import com.citrus.citruskds.util.PrintStatus
+import com.citrus.citruskds.util.UiText
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Locale
@@ -58,18 +66,19 @@ import java.util.Locale
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun KdsScreen(
-    sendToPrint: (Order) -> Unit,
     navigateToOrderReady: () -> Unit,
     viewModel: CentralViewModel,
     askUpdate: () -> Unit
 ) {
     val sizeList = remember { mutableStateMapOf<Int, Pair<Float, Float>>() }
     var errShowing by remember { mutableStateOf(false) }
+    var printErrShowing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val pageState = rememberPagerState(
         pageCount = { HomeTabs.entries.size },
         initialPage = if (prefs.localIp.isEmpty() || (prefs.kdsId.isEmpty() && prefs.mode == 0)) 3 else 0
     )
+
     val selectedTabIndex = remember {
         derivedStateOf { pageState.currentPage }
     }
@@ -88,18 +97,22 @@ fun KdsScreen(
         viewModel.updateCurrentPage(selectedTabIndex.value)
     }
 
-    LaunchedEffect(viewModel.currentState.printOrder) {
-        if (viewModel.currentState.printOrder != null) {
-            Timber.d("Printer issue trace: step 2")
-            sendToPrint(viewModel.currentState.printOrder!!)
-        }
-    }
 
     LaunchedEffect(viewModel.currentState.errMsg) {
         if (viewModel.currentState.errMsg != null) {
             errShowing = true
         }
     }
+
+    LaunchedEffect(viewModel.currentState.printStatus) {
+        when (viewModel.currentState.printStatus) {
+            is PrintStatus.Idle, PrintStatus.Printing -> Unit
+            is PrintStatus.Error -> {
+                printErrShowing = true
+            }
+        }
+    }
+
 
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -233,6 +246,15 @@ fun KdsScreen(
                 viewModel.setEvent(CentralContract.Event.onDismissErrorDialog)
             })
         }
+    }
+
+    if (printErrShowing) {
+        ErrorDialog(
+            UiText.DynamicString((viewModel.currentState.printStatus as PrintStatus.Error).errMsg),
+            onDismissRequest = {
+                printErrShowing = false
+                viewModel.setEvent(CentralContract.Event.onDismissErrorDialog)
+            })
     }
 }
 

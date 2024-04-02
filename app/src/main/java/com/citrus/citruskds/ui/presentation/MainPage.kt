@@ -47,11 +47,13 @@ import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.widget.AllItemDialog
 import com.citrus.citruskds.ui.presentation.widget.OrderItem
 import com.citrus.citruskds.ui.presentation.widget.OrderItemWithOK
 import com.citrus.citruskds.ui.presentation.widget.TextClock
 import com.citrus.citruskds.ui.theme.ColorBlue
+import com.citrus.citruskds.ui.theme.ColorPrimary
 import com.citrus.citruskds.util.InputStateWrapper
 import com.citrus.citruskds.util.TextInputField
 import com.citrus.citruskds.util.pressClickEffect
@@ -141,11 +143,16 @@ fun MainContent(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     dataList[index]
                                 ) { itemCount ->
-                                    MainFeatureBtn(itemCount, viewAll = {
-                                        viewOrder = dataList[index]
-                                    }, finish = {
-                                        event(CentralContract.Event.FinishOrder(dataList[index]))
-                                    })
+                                    MainFeatureBtn(
+                                        status = dataList[index].status,
+                                        size = itemCount,
+                                        viewAll = {
+                                            viewOrder = dataList[index]
+                                        }, finish = {
+                                            event(CentralContract.Event.FinishOrder(dataList[index]))
+                                        }, progressing = {
+                                            event(CentralContract.Event.ProgressOrder(dataList[index]))
+                                        })
                                 }
                             }
 
@@ -236,70 +243,92 @@ fun TitleRow(title: String, state: InputStateWrapper, isShowSearch: Boolean = fa
 
 
 @Composable
-private fun MainFeatureBtn(size: Int, viewAll: () -> Unit, finish: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .height(IntrinsicSize.Min)
-            .fillMaxWidth()
+private fun MainFeatureBtn(
+    status: String,
+    size: Int,
+    viewAll: () -> Unit,
+    finish: () -> Unit,
+    progressing: () -> Unit
+) {
+
+    var orderStatus by remember(status.uppercase()) {
+        mutableStateOf(status.uppercase())
+    }
+
+
+
+    Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
-//        Box(
-//            modifier = Modifier
-//                .pressClickEffect {
-//                    viewAll()
-//                }
-//                .fillMaxHeight()
-//                .background(Color.White, shape = RoundedCornerShape(10.dp))
-//                .border(BorderStroke(2.dp, ColorBlue), shape = RoundedCornerShape(10.dp))
-//
-//        ) {
-//            Text(
-//                text = stringResource(id = R.string.view_all, size),
-//                color = ColorBlue,
-//                fontSize = 14.sp,
-//                modifier = Modifier
-//                    .padding(horizontal = 10.dp)
-//                    .align(Alignment.Center)
-//            )
-//        }
-
-
-        Button(
-            onClick = { finish() },
-            colors = ButtonDefaults.buttonColors(ColorBlue),
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(4.dp, ColorBlue),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .pressClickEffect {
-                    Timber.d("finish")
-                    finish()
-                }
-                .weight(1f)
-
-
+                .height(IntrinsicSize.Min)
+                .fillMaxWidth()
         ) {
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+
+            Button(
+                onClick = {
+                    if (orderStatus != "W" && prefs.isPrepareEnable) {
+                        orderStatus = "W"
+                        progressing()
+                    } else {
+                        finish()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(if (orderStatus != "W" || !prefs.isPrepareEnable) ColorBlue else ColorPrimary),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(4.dp, if (orderStatus != "W" || !prefs.isPrepareEnable) ColorBlue else ColorPrimary),
+                modifier = Modifier
+                    .pressClickEffect {}
+                    .weight(1f)
             ) {
-                Icon(
-                    painter = painterResource(
-                        id = R.drawable.ic_served_fill,
-                    ), contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = Color.White
-                )
-                Text(
-                    text = stringResource(id = R.string.finish),
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(5.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Timber.d("order status~: $status")
+                    if (orderStatus.uppercase() == "W" && prefs.isPrepareEnable) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier
+                                .size(10.dp)
+                                .align(Alignment.CenterVertically)
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(
+                                id = R.drawable.ic_served_fill,
+                            ), contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = Color.White
+                        )
+                    }
+
+
+                    Text(
+                        text = stringResource(id = if (orderStatus != "W" || !prefs.isPrepareEnable) R.string.prepare else R.string.preparing),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(5.dp)
+                    )
+                }
             }
         }
+
+        if (orderStatus == "W" && prefs.isPrepareEnable) {
+            Text(
+                text = "click to finish",
+                color = Color.Black.copy(alpha = 0.8f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
     }
 }
 

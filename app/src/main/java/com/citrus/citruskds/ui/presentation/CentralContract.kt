@@ -6,6 +6,7 @@ import com.citrus.citruskds.commonData.vo.OrderReadyInfo
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.util.InputStateWrapper
+import com.citrus.citruskds.util.PrintStatus
 import com.citrus.citruskds.util.UiEffect
 import com.citrus.citruskds.util.UiEvent
 import com.citrus.citruskds.util.UiState
@@ -19,6 +20,7 @@ class CentralContract {
         data class OnDefaultPageChanged(val page: String) : Event()
         data class OnStockTypeChanged(val type: String) : Event()
         data class FinishOrder(val order: Order, val status: String = "O") : Event()
+        data class ProgressOrder(val order: Order, val status: String = "W") : Event()
         data class CollectedOrder(val orderNo: String, val status: String = "F") : Event()
         data class RecallOrder(val orderNo: String, val status: String = "O") : Event()
         data class OnStockItemClicked(val stockInfo: StockInfo) : Event()
@@ -31,6 +33,8 @@ class CentralContract {
         data object startFetchOrderReadyInfo : Event()
         data object onVerifyCancel : Event()
         data object onDismissErrorDialog : Event()
+        data class onPrintModeChanged(val mode: Int) : Event()
+        data class onPrepareModeChanged(val mode: Boolean) : Event()
     }
 
     data class State(
@@ -64,6 +68,7 @@ class CentralContract {
         var errMsg: UiText? = null,
         var printOrder: Order? = null,
         var printerInfo: ArrayList<Map<String, String>>? = null,
+        var printStatus: PrintStatus = PrintStatus.Idle,
     ) : UiState
 
     sealed class Effect : UiEffect {

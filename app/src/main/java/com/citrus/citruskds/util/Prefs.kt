@@ -19,6 +19,14 @@ class Prefs(context: Context) {
         get() = prefs.getInt("mode", 0)
         set(value) = prefs.edit().putInt("mode", value).apply()
 
+    var printMode: Int
+        get() = prefs.getInt("printMode", 0)
+        set(value) = prefs.edit().putInt("printMode", value).apply()
+
+    var isPrepareEnable: Boolean
+        get() = prefs.getBoolean("isPrepareEnable", false)
+        set(value) = prefs.edit().putBoolean("isPrepareEnable", value).apply()
+
     var language: String
         get() = prefs.getString("language", "English") ?: "English"
         set(value) = prefs.edit().putString("language", value).apply()
