@@ -152,6 +152,8 @@ fun MainContent(
                                             event(CentralContract.Event.FinishOrder(dataList[index]))
                                         }, progressing = {
                                             event(CentralContract.Event.ProgressOrder(dataList[index]))
+                                        }, collected = {
+                                            event(CentralContract.Event.CollectedOrder(dataList[index].orderNo))
                                         })
                                 }
                             }
@@ -248,7 +250,8 @@ private fun MainFeatureBtn(
     size: Int,
     viewAll: () -> Unit,
     finish: () -> Unit,
-    progressing: () -> Unit
+    progressing: () -> Unit,
+    collected: () -> Unit
 ) {
 
     var orderStatus by remember(status.uppercase()) {
@@ -271,6 +274,13 @@ private fun MainFeatureBtn(
 
             Button(
                 onClick = {
+
+                    Timber.d("order status click: $status")
+                    if (orderStatus == "O") {
+                        collected()
+                        return@Button
+                    }
+
                     if (orderStatus != "W" && prefs.isPrepareEnable) {
                         orderStatus = "W"
                         progressing()
@@ -278,9 +288,12 @@ private fun MainFeatureBtn(
                         finish()
                     }
                 },
-                colors = ButtonDefaults.buttonColors(if (orderStatus != "W" || !prefs.isPrepareEnable) ColorBlue else ColorPrimary),
+                colors = ButtonDefaults.buttonColors(if (orderStatus != "W" || !prefs.isPrepareEnable) (if (orderStatus == "O") ColorPrimary else ColorBlue) else ColorPrimary),
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(4.dp, if (orderStatus != "W" || !prefs.isPrepareEnable) ColorBlue else ColorPrimary),
+                border = BorderStroke(
+                    4.dp,
+                    if (orderStatus != "W" || !prefs.isPrepareEnable) (if (orderStatus == "O") ColorPrimary else ColorBlue) else ColorPrimary
+                ),
                 modifier = Modifier
                     .pressClickEffect {}
                     .weight(1f)
@@ -308,9 +321,8 @@ private fun MainFeatureBtn(
                         )
                     }
 
-
                     Text(
-                        text = stringResource(id = if (orderStatus != "W" || !prefs.isPrepareEnable) R.string.prepare else R.string.preparing),
+                        text = stringResource(id = if (orderStatus != "W" || !prefs.isPrepareEnable) (if (orderStatus == "O") R.string.prepared else R.string.prepare) else R.string.preparing),
                         color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,

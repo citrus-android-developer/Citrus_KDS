@@ -303,16 +303,16 @@ class CentralViewModel @Inject constructor(
             /**Main Finish按鍵觸發*/
             is CentralContract.Event.FinishOrder -> {
                 Timber.d("FinishOrder: ${event.order.orderNo}")
-                if (currentState.printStatus != PrintStatus.Idle) {
-                    return
-                }
+//                if (currentState.printStatus != PrintStatus.Idle) {
+//                    return
+//                }
                 setOrderStatus(orderNo = event.order.orderNo, status = event.status)
 
-                if (prefs.printMode == 1) {
-                    setState {
-                        copy(printOrder = event.order)
-                    }
-                }
+//                if (prefs.printMode == 1) {
+//                    setState {
+//                        copy(printOrder = event.order)
+//                    }
+//                }
             }
 
             is CentralContract.Event.ProgressOrder -> {
@@ -400,12 +400,14 @@ class CentralViewModel @Inject constructor(
 
             /**重印廚房單*/
             is CentralContract.Event.ReprintOrder -> {
+
+                Timber.d("Printer issue trace: ${prefs.printMode}")
                 if (currentState.printStatus != PrintStatus.Idle) {
                     return
                 }
 
 
-                if (prefs.printMode == 1) {
+                if (prefs.printMode == 0) {
                     setState {
                         Timber.d("Printer issue trace: step 1")
                         copy(printOrder = event.order)
@@ -498,7 +500,7 @@ class CentralViewModel @Inject constructor(
 
                 is Result.Success -> {
                     Timber.d("setOrderStatus: ${result.data}")
-                    if (status == "O") {
+                    if (status == "O" || status == "F") {
                         setState {
                             copy(mainList = currentState.mainList?.map {
                                 if (it.orderNo == orderNo) {

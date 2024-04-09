@@ -20,6 +20,7 @@
     <string name="finish">FINISH</string>
     <string name="prepare">NEW</string>
     <string name="preparing">PREPARING</string>
+    <string name="prepared">Collect</string>
     <string name="search_order">Search Order</string>
     <string name="search_item">Search Item</string>
     <string name="set_stock">SetStock</string>

@@ -203,7 +203,7 @@ private fun RecallFeatureBtn(status: String, noShow: () -> Unit, reCall: () -> U
             ) {
                 Icon(
                     painter = painterResource(
-                        id = R.drawable.ic_served_fill,
+                        id = R.drawable.ic_recall_fill,
                     ), contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = Color.White

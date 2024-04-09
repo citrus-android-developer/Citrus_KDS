@@ -201,14 +201,11 @@ private fun ServedFeatureBtn(reprint: () -> Unit, collected: () -> Unit) {
 
 
         Button(
-            onClick = { collected() },
-            colors = ButtonDefaults.buttonColors(ColorBlue),
+            onClick = {  },
+            colors = ButtonDefaults.buttonColors(Color.DarkGray),
             shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(4.dp, ColorBlue),
+            border = BorderStroke(4.dp, Color.DarkGray),
             modifier = Modifier
-                .pressClickEffect {
-
-                }
                 .weight(1f)
                 .padding(start = 10.dp)
 
@@ -220,7 +217,7 @@ private fun ServedFeatureBtn(reprint: () -> Unit, collected: () -> Unit) {
             ) {
                 Icon(
                     painter = painterResource(
-                        id = R.drawable.ic_recall_fill,
+                        id = R.drawable.ic_served_fill,
                     ), contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = Color.White

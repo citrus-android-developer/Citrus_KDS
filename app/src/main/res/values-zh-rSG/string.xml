@@ -20,6 +20,7 @@
     <string name="finish">完成</string>
     <string name="prepare">新单</string>
     <string name="preparing">处理中</string>
+    <string name="prepared">已处理</string>
     <string name="search_order">搜索订单</string>
     <string name="set_stock">设置库存</string>
     <string name="search_item">搜索品项</string>
