@@ -58,6 +58,7 @@
     <string name="is_prepare_status_enable">准备状态是否启用</string>
 
 
+
     <string name="handlingmsg_warn_receipt_near_end">Roll paper is nearly end.\n</string>
     <string name="handlingmsg_warn_battery_near_end">Battery level of printer is low.\n</string>
     <string name="handlingmsg_warn_detect_paper">Please take the receipt.\n</string>

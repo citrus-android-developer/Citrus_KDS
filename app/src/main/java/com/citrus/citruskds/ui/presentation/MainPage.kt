@@ -207,9 +207,9 @@ fun TitleRow(title: String, state: InputStateWrapper, isShowSearch: Boolean = fa
                 .padding(start = 26.dp)
                 .align(Alignment.CenterVertically),
             color = ColorBlue,
-            format = "kk:mm:ss",
+            format = "yyyy/MM/dd kk:mm:ss",
             style = TextStyle(
-                fontSize = 24.sp,
+                fontSize = 22.sp,
                 color = ColorBlue,
                 fontWeight = FontWeight.Bold
             )

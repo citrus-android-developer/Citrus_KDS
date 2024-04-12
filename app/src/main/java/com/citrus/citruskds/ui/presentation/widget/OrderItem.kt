@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
@@ -53,7 +54,7 @@ fun OrderItem(
 ) {
 
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
-    
+
     val disPlayLan = state.displayLan
 
     val bgColor = if (order.status == "O") {
@@ -90,15 +91,29 @@ fun OrderItem(
                     .padding(10.dp)
 
             ) {
-                Text(
-                    text = stringResource(id = R.string.no) + order.orderNo,
-                    color = ColorBlue,
-                    textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .padding(2.dp)
-                        .align(Alignment.CenterHorizontally)
-                )
+
+                Column {
+                    val no = order.orderNo
+                    val shortNo = no.substring(0, 3) + "-" + no.takeLast(5)
+                    Text(
+                        text = stringResource(id = R.string.no) + shortNo,
+                        color = ColorBlue,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                    )
+                    Text(
+                        text = stringResource(id = R.string.order_time) + order.orderTime.split(" ")[1],
+                        color = Color.Black,
+                        textAlign = TextAlign.End,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                    )
+                }
+
                 HorizontalDivider()
                 LazyColumn(
                     modifier = Modifier
