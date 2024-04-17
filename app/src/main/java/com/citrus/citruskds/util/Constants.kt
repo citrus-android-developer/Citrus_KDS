@@ -22,6 +22,7 @@ object Constants {
     const val POS_SET_ORDER_STATUS = "/KDS/SetOrderStatus"
     const val POS_GET_STOCK_INFO = "/KDS/InventoryList"
     const val POS_SET_INVENTORY = "/KDS/SetInventory"
+    const val POS_SET_SELL_STATUS = "/KDS/SetSellStatus"
 
     const val POS_GET_ORDER_READY_INFO = "/controller/OrdersList"
 

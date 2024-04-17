@@ -5,6 +5,7 @@ import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.OrderReadyInfo
 import com.citrus.citruskds.commonData.vo.OrderRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
+import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
 import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 import retrofit2.http.Body
@@ -44,5 +45,11 @@ interface ApiService {
         @Url url: String,
     ): ApiResult<List<OrderReadyInfo>>
 
+
+    @POST
+    suspend fun setSellStatus(
+        @Url url: String,
+        @Body setItemSellStatusRequest: SetItemSellStatusRequest
+    ): ApiResult<Int>
 
 }

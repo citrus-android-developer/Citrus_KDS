@@ -94,11 +94,11 @@ enum class HomeTabs(
         text = "ReCall",
     ),
 
-//    SetStock(
-//        selectedIcon = R.drawable.ic_setstock_fill,
-//        unSelectedIcon = R.drawable.ic_setstock_outline,
-//        text = "SetStock",
-//    ),
+    SetStock(
+        selectedIcon = R.drawable.ic_setstock_fill,
+        unSelectedIcon = R.drawable.ic_setstock_outline,
+        text = "SetStock",
+    ),
 
     Setting(
         selectedIcon = R.drawable.ic_setting_fill,

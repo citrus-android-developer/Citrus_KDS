@@ -76,7 +76,7 @@ fun KdsScreen(
     val scope = rememberCoroutineScope()
     val pageState = rememberPagerState(
         pageCount = { HomeTabs.entries.size },
-        initialPage = if (prefs.localIp.isEmpty() || (prefs.kdsId.isEmpty() && prefs.mode == 0)) 3 else 0
+        initialPage = if (prefs.localIp.isEmpty() || (prefs.kdsId.isEmpty() && prefs.mode == 0)) 4 else 0
     )
 
     val selectedTabIndex = remember {
@@ -166,7 +166,7 @@ fun KdsScreen(
                             "Main" -> stringResource(id = R.string.main)
                             "Served" -> stringResource(id = R.string.served)
                             "ReCall" -> stringResource(id = R.string.recall)
-//                            "SetStock" -> stringResource(id = R.string.set_stock)
+                            "SetStock" -> stringResource(id = R.string.set_stock)
                             "Setting" -> stringResource(id = R.string.setting)
                             else -> ""
                         }
@@ -268,8 +268,8 @@ fun ReadyForPage(
         0 -> MainPage(homeViewModel)
         1 -> ServedPage(homeViewModel)
         2 -> RecallPage(homeViewModel)
-//        3 -> SetStockPage(homeViewModel)
-        3 -> SettingPage(homeViewModel, onVerifyCancel = {
+        3 -> SetStockPage(homeViewModel)
+        4 -> SettingPage(homeViewModel, onVerifyCancel = {
             homeViewModel.setEvent(CentralContract.Event.onVerifyCancel)
         }, navigateTo = {})
     }
