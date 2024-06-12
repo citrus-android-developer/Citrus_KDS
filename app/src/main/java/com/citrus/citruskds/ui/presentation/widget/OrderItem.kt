@@ -1,15 +1,13 @@
 package com.citrus.citruskds.ui.presentation.widget
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,8 +21,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -36,14 +32,13 @@ import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
+import com.citrus.citruskds.commonData.vo.Detail
 import com.citrus.citruskds.commonData.vo.Order
-import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.CentralContract
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorPinkBg
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
 import com.citrus.citruskds.ui.theme.ColorYellowBg
-import timber.log.Timber
 
 @Composable
 fun OrderItem(
@@ -54,7 +49,6 @@ fun OrderItem(
 ) {
 
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
-
     val disPlayLan = state.displayLan
 
     val bgColor = if (order.status == "O") {
@@ -67,7 +61,24 @@ fun OrderItem(
 
     val size = order.detail.size
     val flavorSize = order.detail.filter { !it.flavor.isNullOrBlank() }.size
-    val default = if (disPlayLan == "English & 华文") 50 else 40
+    val addSize = order.detail.filter { !it.addition.isNullOrBlank() }.size
+    val default = if (disPlayLan == "English & 华文") 50 else 44
+
+
+    val orderDetail = order.detail
+    //將detail迭代，如果gType為M，則將接下來gType為S的detail加入到M的MiddleDetail中
+    for (i in 0 until orderDetail.size) {
+        if (orderDetail[i].gType == "M" || orderDetail[i].gType == "G") {
+            orderDetail[i].middleDetail = mutableListOf()
+            for (j in i + 1 until orderDetail.size) {
+                if (orderDetail[j].gType == "S") {
+                    orderDetail[i].middleDetail = orderDetail[i].middleDetail?.plus(orderDetail[j])
+                } else {
+                    break
+                }
+            }
+        }
+    }
 
     Card(
         colors = CardDefaults.cardColors(
@@ -87,7 +98,7 @@ fun OrderItem(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
-                    .height((200 + ((size + flavorSize) * default)).dp)
+                    .height((200 + ((size + flavorSize + addSize) * default)).dp)
                     .padding(10.dp)
 
             ) {
@@ -115,42 +126,33 @@ fun OrderItem(
                 }
 
                 HorizontalDivider()
+
                 LazyColumn(
                     modifier = Modifier
-                        .weight(2.5f)
                         .align(Alignment.Start),
                     content = {
-                        items(order.detail.size) { index ->
+
+                        items(orderDetail.filter { it.gType != "S" }.size) { index ->
+
+                            val data = orderDetail.filter { it.gType != "S" }[index]
 
                             val flavor =
-                                if (order.detail[index].flavor.isNullOrBlank()) "" else "#${order.detail[index].flavor}"
+                                if (data.flavor.isNullOrBlank()) "" else "\n#${data.flavor}"
 
-                            when (disPlayLan) {
-                                "English" -> OneLineItemInfo(
-                                    order.detail[index].eName,
-                                    order.detail[index].qty.toString(),
-                                    "\n" + flavor,
-                                    index
-                                )
+                            val add = if (data.addition.isNullOrBlank()) "" else "\n#${data.addition}"
 
-                                "华文" -> OneLineItemInfo(
-                                    order.detail[index].cName,
-                                    order.detail[index].qty.toString(),
-                                    "\n" + flavor,
-                                    index
-                                )
-
-                                else -> TwoLineItemInfo(
-                                    order.detail[index].eName,
-                                    order.detail[index].cName,
-                                    order.detail[index].qty.toString(),
-                                    flavor,
-                                    index
-                                )
-                            }
+                            OneLineItemInfo(
+                                data.eName,
+                                data.qty.toString(),
+                                flavor,
+                                add,
+                                index,
+                                data.middleDetail
+                            )
                         }
                     })
                 HorizontalDivider()
+                Spacer(modifier = Modifier)
                 featureBtn(order.detail.size)
             }
         }
@@ -159,55 +161,42 @@ fun OrderItem(
 
 
 @Composable
-fun TwoLineItemInfo(name1: String, name2: String, qty: String, flavor: String, index: Int) {
+fun OneLineItemInfo(
+    name: String,
+    qty: String,
+    flavor: String,
+    add: String,
+    index: Int,
+    middleList: List<Detail>?
+) {
     Column(
-        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.Start,
         modifier = Modifier
-            .fillMaxWidth()
-            .let { if (index % 2 != 0) it.background(Color.White.copy(alpha = 0.5f)) else it }
-
+            .fillMaxWidth() // Fill the parent container
+            .padding(5.dp)
+            .let { if (index % 2 != 0) it.background(Color.White.copy(alpha = 0.5f)) else it },
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start,
+        Text(
+            text = "$qty x $name$flavor$add",
+            color = ColorBlue,
             modifier = Modifier
-                .fillMaxWidth()
-        ) {
-            Text(
-                text = "$qty x",
-                color = ColorBlue,
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
+                .padding(all = 5.dp)
+        )
+
+
+
+        if (middleList != null) {
+            //回圈方式產生text呈現ename
+            for (i in 0 until middleList.size) {
                 Text(
-                    text = name1,
+                    text = " " + middleList[i].eName,
                     color = ColorBlue,
-                )
-                Text(
-                    text = name2,
-                    color = ColorBlue,
+                    modifier = Modifier
+                        .padding(start = 20.dp, top = 10.dp)
                 )
             }
-        }
-        Text(
-            text = flavor,
-            color = ColorBlue,
-        )
-    }
-}
 
-@Composable
-fun OneLineItemInfo(name: String, qty: String, flavor: String, index: Int) {
-    Box(modifier = Modifier
-        .fillMaxWidth()
-        .let { if (index % 2 != 0) it.background(Color.White.copy(alpha = 0.5f)) else it }) {
-        Text(
-            text = "$qty x $name$flavor",
-            color = ColorBlue,
-            modifier = Modifier
-                .padding(vertical = 2.dp)
-                .align(Alignment.CenterStart)
-        )
+
+        }
     }
 }

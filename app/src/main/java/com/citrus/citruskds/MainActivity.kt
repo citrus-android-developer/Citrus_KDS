@@ -166,6 +166,10 @@ class MainActivity : ComponentActivity() {
 
                 val updateAsk = remember { mutableStateOf(false) }
 
+//                LaunchedEffect(Unit) {
+//                    downloadApk("citrus_kds.apk", "citrus_kds.apk")
+//                }
+
                 LaunchedEffect(homeViewModel.currentState.isVerifyCancel) {
                     if (homeViewModel.currentState.isVerifyCancel) {
                         this@MainActivity.finish()
@@ -312,14 +316,14 @@ class MainActivity : ComponentActivity() {
 
 
     private fun downloadApk(name: String, current: String) {
-        if (name == current) {
-            Toast.makeText(this, "No need to update", Toast.LENGTH_SHORT).show()
-            return
-        }
+//        if (name == current) {
+//            Toast.makeText(this, "No need to update", Toast.LENGTH_SHORT).show()
+//            return
+//        }
 
         downloadDetecter.intentUpdate(
             getFile(),
-            Constants.DOWNLOAD_URL + "citrus_kds_v$name.apk"
+            Constants.DOWNLOAD_URL + "citrus_kds_v1.0.3.apk"
         )
         mProgressDialog.show()
 

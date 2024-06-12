@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import timber.log.Timber
 import java.io.File
 import java.lang.Exception
 import kotlin.math.roundToInt
@@ -39,6 +40,7 @@ suspend fun HttpClient.downloadFile(file: File, url: String): Flow<DownloadStatu
             val currentRead = response.content.readAvailable(byteArray, offset, byteArray.size)
             offset += currentRead
             val progress = (offset * 100f / byteArray.size).roundToInt()
+            Timber.d("progress: $progress")
             emit(DownloadStatus.Progress(progress))
         } while (currentRead > 0)
 

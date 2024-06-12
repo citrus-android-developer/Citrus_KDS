@@ -161,6 +161,16 @@ private fun ConnectParams(
                     modifier = Modifier.padding(bottom = 20.dp)
                 )
                 Spacer(modifier = Modifier.height(10.dp))
+                Text(text = "RSNO", fontSize = 14.sp, color = ColorBlue)
+                TextInputField(
+                    textFieldValue = state.rsnoState,
+                    placeholder = "RSNO",
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Next,
+                    enabled = true,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(text = "POS IP", fontSize = 14.sp, color = ColorBlue)
                 TextInputField(
                     textFieldValue = state.localIpState,

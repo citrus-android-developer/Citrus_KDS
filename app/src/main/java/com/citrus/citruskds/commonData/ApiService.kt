@@ -4,6 +4,7 @@ import com.citrus.citruskds.commonData.vo.ApiResult
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.OrderReadyInfo
 import com.citrus.citruskds.commonData.vo.OrderRequest
+import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
 import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
 import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
@@ -47,9 +48,22 @@ interface ApiService {
 
 
     @POST
-    suspend fun setSellStatus(
+    suspend fun setSellStatusLocal(
         @Url url: String,
         @Body setItemSellStatusRequest: SetItemSellStatusRequest
+    ): ApiResult<Int>
+
+    @POST
+    suspend fun setSellStatusRemote(
+        @Url url: String,
+        @Body setItemSellStatusRequest: SetItemSellStatusRequest
+    ): ApiResult<Int>
+
+
+    @POST
+    suspend fun setOrdersNotify(
+        @Url url: String,
+        @Body ordersNotifyRequest: OrdersNotifyRequest
     ): ApiResult<Int>
 
 }

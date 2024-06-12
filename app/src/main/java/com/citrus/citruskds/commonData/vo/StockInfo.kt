@@ -16,10 +16,8 @@ data class StockInfo(
     var gKEName: String?,
     @Json(name = "GKID")
     var gKID: String?,
+    @Json(name = "SellStatus")
+    var sellStatus: String?,
     @Json(name = "Size")
     var size: String?,
-    @Json(name = "Stock")
-    var stock: String?,
-    @Json(ignore = true)
-    var isSelect: Boolean = false
 )

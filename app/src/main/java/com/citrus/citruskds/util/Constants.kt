@@ -24,10 +24,14 @@ object Constants {
     const val POS_SET_INVENTORY = "/KDS/SetInventory"
     const val POS_SET_SELL_STATUS = "/KDS/SetSellStatus"
 
+    const val SERVER_SET_SELL_STATUS = "KDS/SetSellStatus"
+    const val SERVER_SET_ORDERS_NOTIFY = "KDS/OrdersNotify"
+
     const val POS_GET_ORDER_READY_INFO = "/controller/OrdersList"
 
 
-    const val BASE_URL = "https://lab.citrus.tw/CompassKiosk/"
+    const val BASE_URL = "https://lab.citrus.tw/CompassKDS/"
+    //const val BASE_URL = "https://global.citrus.tw/CompassKiosk/"
 
 
     var df = DecimalFormat("#,###,##0.###")
@@ -58,6 +62,18 @@ object Constants {
     const val KEY_BG_COLOR = "KEY_BG_COLOR"
 
     const val DOWNLOAD_URL = "http://hq.citrus.tw/apk/"
+
+
+    /**status:J*/
+    const val NEW = "J"
+    /**status:O*/
+    const val PREPARED = "O"
+    /**status:W*/
+    const val PROGRESSING = "W"
+    /**status:F*/
+    const val COLLECTED = "F"
+
+
 
 
     /**Fail Message Type*/
@@ -158,9 +174,8 @@ object Constants {
 
 
     fun String.sha3_256(): String {
-//        Security.addProvider(BouncyCastleProvider())
-//        val md = MessageDigest.getInstance("SHA3-256", "BC")
-        return "8e6bee4d4beba2cb8da31443602b5c4ed3f95fc11b3400b6189f7a0622cd2ca4"
+
+        return "5EC8433D25C759DD6BB965090F6835C77BB569CE86F3713B2D364E642F693280"
     }
 
 

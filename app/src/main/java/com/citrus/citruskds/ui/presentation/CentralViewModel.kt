@@ -7,19 +7,26 @@ import androidx.compose.foundation.text2.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text2.input.textAsFlow
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.viewModelScope
+import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.DataError
 import com.citrus.citruskds.commonData.NetworkError
 import com.citrus.citruskds.commonData.Resource
 import com.citrus.citruskds.commonData.Result
+import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
+import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
 import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.domain.ApiRepositoryImpl
 import com.citrus.citruskds.util.BaseViewModel
+import com.citrus.citruskds.util.Constants.COLLECTED
+import com.citrus.citruskds.util.Constants.PREPARED
+import com.citrus.citruskds.util.Constants.PROGRESSING
 import com.citrus.citruskds.util.InputStateWrapper
 import com.citrus.citruskds.util.PrintStatus
 import com.citrus.citruskds.util.PrinterDetecter
+import com.citrus.citruskds.util.UiText
 import com.citrus.citruskds.util.asUiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -117,25 +124,38 @@ class CentralViewModel @Inject constructor(
                         } else {
                             it.cName?.contains(name, ignoreCase = true) == true
                         }
-                    }.let { info ->
-                        if (list?.find { it.isSelect } != null) {
-                            val target = list.find { it.isSelect }
-
-                            info?.map {
-                                if (it.gID == target!!.gID && it.gKID == target.gKID) {
-                                    it.copy(isSelect = true)
+                    }.let { stockInfo ->
+                        if (currentState.setStatusGkidGid != null) {
+                            stockInfo?.map {
+                                if (it.gID == currentState.setStatusGkidGid?.first && it.gKID == currentState.setStatusGkidGid?.second) {
+                                    it.copy(sellStatus = if (it.sellStatus == "Available") "Unavailable" else "Available")
                                 } else {
                                     it
                                 }
                             }
                         } else {
-                            info
+                            stockInfo
                         }
                     }
 
+                    val nowList = if (currentState.setStatusGkidGid != null) {
+                        currentState.stockInfoList?.map {
+                            if (it.gID == currentState.setStatusGkidGid?.first && it.gKID == currentState.setStatusGkidGid?.second) {
+                                it.copy(sellStatus = if (it.sellStatus == "Available") "Unavailable" else "Available")
+                            } else {
+                                it
+                            }
+                        }
+                    } else {
+                        currentState.stockInfoList
+                    }
 
                     setState {
-                        copy(stockInfoPresentList = stockInfoFilterPresentList)
+                        copy(
+                            stockInfoList = nowList,
+                            stockInfoPresentList = stockInfoFilterPresentList,
+                            setStatusGkidGid = null
+                        )
                     }
                 }
         }
@@ -144,6 +164,12 @@ class CentralViewModel @Inject constructor(
         viewModelScope.launch {
             currentState.kdsIdState.state.textAsFlow().collectLatest {
                 prefs.kdsId = it.toString()
+            }
+        }
+
+        viewModelScope.launch {
+            currentState.rsnoState.state.textAsFlow().collectLatest {
+                prefs.rsno = it.toString()
             }
         }
 
@@ -196,6 +222,7 @@ class CentralViewModel @Inject constructor(
         }
         return CentralContract.State(
             kdsIdState = InputStateWrapper(TextFieldState(prefs.kdsId)),
+            rsnoState = InputStateWrapper(TextFieldState(prefs.rsno)),
             localIpState = InputStateWrapper(TextFieldState(prefs.localIp)),
             languageState = InputStateWrapper(TextFieldState(prefs.language)),
             itemDisplayLanState = InputStateWrapper(TextFieldState(prefs.itemDisplayLan)),
@@ -321,7 +348,7 @@ class CentralViewModel @Inject constructor(
                 setState {
                     copy(mainList = currentState.mainList?.map {
                         if (it.orderNo == event.order.orderNo) {
-                            it.copy(status = "W")
+                            it.copy(status = PROGRESSING)
                         } else {
                             it
                         }
@@ -364,22 +391,29 @@ class CentralViewModel @Inject constructor(
 
             /**選擇庫存品項*/
             is CentralContract.Event.OnStockItemClicked -> {
-                val list = currentState.stockInfoPresentList?.map {
-                    if (it.gID == event.stockInfo.gID && it.gKID == event.stockInfo.gKID) {
-                        it.copy(isSelect = !it.isSelect)
-                    } else {
-                        it.copy(isSelect = false)
+
+                if (event.stockInfo.gID?.isBlank() == true || event.stockInfo.gKID?.isBlank() == true) {
+                    setState {
+                        copy(errMsg = UiText.StringResource(R.string.item_abnormal))
                     }
+                    return
                 }
 
-                setState {
-                    copy(stockInfoPresentList = list)
-                }
+                setSellStatus(
+                    SetItemSellStatusRequest(
+                        gID = event.stockInfo.gID ?: "",
+                        gKID = event.stockInfo.gKID ?: "",
+                        status = if (event.stockInfo.sellStatus == "Available") "Sold Out" else "Available",
+                        storeNo = prefs.rsno,
+                        gname = event.stockInfo.eName ?: event.stockInfo.cName ?: "",
+                        size = event.stockInfo.size ?: ""
+                    )
+                )
             }
 
             /**設定品項庫存*/
             is CentralContract.Event.OnSetInventory -> {
-                setInventory(event.stock)
+                //setInventory(event.stock)
             }
 
             /**選擇印表機*/
@@ -454,36 +488,114 @@ class CentralViewModel @Inject constructor(
         orderReadyJob?.cancel()
     }
 
+    private fun setSellStatus(setItemSellStatusRequest: SetItemSellStatusRequest) =
+        viewModelScope.launch {
+            repository.setSellStatus(setItemSellStatusRequest).collect { result ->
+                when (result) {
+                    is Result.Loading -> {
+                        Timber.d("setSellStatus: ${result.isLoading}")
+                    }
 
-    private fun setInventory(stockInfo: StockInfo) = viewModelScope.launch {
-        repository.setInventory(
-            setInventoryRequest = SetInventoryRequest(
-                gID = stockInfo.gID!!,
-                gKID = stockInfo.gKID!!,
-                stock = stockInfo.stock!!.toInt()
-            )
-        ).collect { result ->
-            when (result) {
-                is Result.Loading -> {
-                    Timber.d("setInventory: ${result.isLoading}")
-                }
+                    is Result.Success -> {
+                        Timber.d("setSellStatus: success")
+                        val list = currentState.stockInfoPresentList?.map {
+                            if (it.gID == setItemSellStatusRequest.gID && it.gKID == setItemSellStatusRequest.gKID) {
+                                Timber.d("setSellStatus: success  ${it.sellStatus}")
+                                it.copy(sellStatus = if (it.sellStatus == "Available") "Sold out" else "Available")
+                            } else {
+                                it
+                            }
+                        }
 
-                is Result.Success -> {
-                    Timber.d("setInventory: Success")
-                    fetchStockInfo()
-                }
+                        Timber.d("setSellStatus: success  ${list?.find { it.gID == setItemSellStatusRequest.gID && it.gKID == setItemSellStatusRequest.gKID }}")
 
-                is Result.Error -> {
-                    when (result.error) {
-                        is NetworkError -> {
-                            setState {
-                                copy(errMsg = result.error.asUiText())
+                        setState {
+                            copy(
+                                setStatusGkidGid = setItemSellStatusRequest.gID to setItemSellStatusRequest.gKID,
+                                stockInfoPresentList = list
+                            )
+                        }
+
+                        setSellStatusRemote(setItemSellStatusRequest)
+                    }
+
+                    is Result.Error -> {
+                        Timber.d("setSellStatus: err occur")
+                        Timber.d("setSellStatus: ${result.error}")
+                        when (result.error) {
+                            is NetworkError -> {
+                                Timber.d("setSellStatus 123: ${result.error.asUiText()}")
+                                setState {
+                                    copy(errMsg = result.error.asUiText())
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+
+    private fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest) =
+        viewModelScope.launch {
+            repository.setSellStatusRemote(setItemSellStatusRequest).collect { result ->
+                when (result) {
+                    is Result.Loading -> {
+                        Timber.d("setSellStatus Remote: ${result.isLoading}")
+                    }
+
+                    is Result.Success -> {
+                        Timber.d("setSellStatus Remote: success")
+                    }
+
+                    is Result.Error -> {
+                        Timber.d("setSellStatus Remote: ${result.error}")
+                    }
+                }
+            }
+        }
+
+
+//    private fun setInventory(stockInfo: StockInfo) = viewModelScope.launch {
+//        repository.setInventory(
+//            setInventoryRequest = SetInventoryRequest(
+//                gID = stockInfo.gID!!,
+//                gKID = stockInfo.gKID!!,
+//                stock = stockInfo.stock!!.toInt()
+//            )
+//        ).collect { result ->
+//            when (result) {
+//                is Result.Loading -> {
+//                    Timber.d("setInventory: ${result.isLoading}")
+//                }
+//
+//                is Result.Success -> {
+//                    Timber.d("setInventory: Success")
+//                    fetchStockInfo()
+//                }
+//
+//                is Result.Error -> {
+//                    when (result.error) {
+//                        is NetworkError -> {
+//                            setState {
+//                                copy(errMsg = result.error.asUiText())
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//    }
+
+
+    private fun setOrdersNotify(orderNo: String) = viewModelScope.launch {
+        Timber.d("setOrdersNotify: $orderNo")
+        repository.setOrdersNotifyRemote(
+            ordersNotifyRequest = OrdersNotifyRequest(
+                storeNo = prefs.rsno,
+                orderNo = orderNo
+            )
+        ).collect()
     }
 
     private fun setOrderStatus(orderNo: String, status: String) = viewModelScope.launch {
@@ -500,7 +612,12 @@ class CentralViewModel @Inject constructor(
 
                 is Result.Success -> {
                     Timber.d("setOrderStatus: ${result.data}")
-                    if (status == "O" || status == "F") {
+                    if (status == PREPARED || status == COLLECTED) {
+
+                        if(status == PREPARED) {
+                            setOrdersNotify(orderNo)
+                        }
+
                         setState {
                             copy(mainList = currentState.mainList?.map {
                                 if (it.orderNo == orderNo) {
@@ -647,8 +764,6 @@ class CentralViewModel @Inject constructor(
                 }
 
                 is Result.Success -> {
-                    Timber.d("fetchOrders: ${result.data}")
-                    Timber.d("fetchOrders: ${currentState.currentPage.lowercase()}")
                     when (currentState.currentPage.lowercase()) {
                         "main" -> {
                             setState {
@@ -700,6 +815,12 @@ class CentralViewModel @Inject constructor(
             2 -> {
                 setState {
                     copy(currentPage = "recall")
+                }
+            }
+
+            3 -> {
+                setState {
+                    copy(currentPage = "setStock")
                 }
             }
 

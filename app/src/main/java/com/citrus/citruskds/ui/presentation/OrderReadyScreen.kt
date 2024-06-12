@@ -164,7 +164,7 @@ fun OrderReadyScreen(
                                     text = it.getOrNull(index)?.orderNo?.take(20)
                                         ?.joinToString { orderNo ->
                                             val firstThree = orderNo.substring(0, 3)
-                                            val lastFive = orderNo.takeLast(5)
+                                            val lastFive = orderNo.takeLast(4)
                                             val result = "$firstThree-$lastFive"
                                             result
                                         }

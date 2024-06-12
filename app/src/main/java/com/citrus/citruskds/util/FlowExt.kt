@@ -25,12 +25,14 @@ fun <T> resultFlowData(apiAction: suspend () -> ApiResult<T>, isNeedLoading: Boo
     flow {
         val apiActionResult = apiAction()
         emit(if (apiActionResult.status != "1") {
+            Timber.d("api error: ${apiActionResult.error?.message}")
             Result.Error<T, RootError>(
                 NetworkError.DataFetchFailed(
                     errMsg = apiActionResult.error?.message
                 )
             )
         } else {
+            Timber.d("api error else : ${apiActionResult.error?.message}")
             apiActionResult.data?.let {
                 Result.Success<T, RootError>(data = it)
             } ?: Result.Success(Unit)

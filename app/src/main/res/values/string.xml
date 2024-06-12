@@ -56,7 +56,7 @@
     <string name="download_hint">Version Number</string>
     <string name="kitchen_order">Print Kitchen Order</string>
     <string name="is_prepare_status_enable">Is Prepare Status Enable</string>
-
+    <string name="item_abnormal">The item is abnormal, please check the background settings.</string>
 
 
     <string name="handlingmsg_warn_receipt_near_end">Roll paper is nearly end.\n</string>

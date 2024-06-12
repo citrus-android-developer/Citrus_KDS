@@ -19,12 +19,16 @@ data class Order(
 )
 
 data class Detail(
+    @Json(name = "GType")
+    var gType: String,
     @Json(name = "CName")
     var cName: String,
     @Json(name = "EName")
     var eName: String,
     @Json(name = "Flavor")
     var flavor: String?,
+    @Json(name = "Addition")
+    var addition: String?,
     @Json(name = "GID")
     var gID: String,
     @Json(name = "GKID")
@@ -32,7 +36,9 @@ data class Detail(
     @Json(name = "Qty")
     var qty: Int,
     @Json(name = "Price")
-    var price: Double
+    var price: Double,
+    @Json(name = "middleDetail")
+    var middleDetail: List<Detail>?,
 )
 
 

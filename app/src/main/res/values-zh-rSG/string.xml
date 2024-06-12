@@ -56,7 +56,7 @@
     <string name="download_hint">版本号</string>
     <string name="kitchen_order">厨房单打印</string>
     <string name="is_prepare_status_enable">准备状态是否启用</string>
-
+    <string name="item_abnormal">品项异常，请查询后台设定</string>
 
 
     <string name="handlingmsg_warn_receipt_near_end">Roll paper is nearly end.\n</string>

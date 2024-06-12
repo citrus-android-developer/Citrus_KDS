@@ -9,6 +9,10 @@ data class SetItemSellStatusRequest(
     var gKID: String,
     @Json(name = "GID")
     var gID: String,
-    @Json(name = "Qty")
-    var qty: Int
+    @Json(name = "Gname")
+    var gname: String,
+    @Json(name = "Status")
+    var status: String,
+    @Json(name = "Size")
+    var size: String
 )

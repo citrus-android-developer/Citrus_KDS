@@ -225,9 +225,9 @@ fun SetStockContent(
                                 StockItem(dataList[index], onSelected = {
                                     event(CentralContract.Event.OnStockItemClicked(dataList[index]))
                                 }, onChangeStock = {
-                                    val stock = dataList[index].copy()
-                                    stock.stock = it.toString()
-                                    event(CentralContract.Event.OnSetInventory(stock))
+//                                    val stock = dataList[index].copy()
+//                                    stock.stock = it.toString()
+//                                    event(CentralContract.Event.OnSetInventory(stock))
                                 })
                             }
 

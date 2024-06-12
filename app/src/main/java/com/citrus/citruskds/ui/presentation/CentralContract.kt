@@ -41,6 +41,7 @@ class CentralContract {
         var isVerifyCancel: Boolean = false,
         var modeState: Int = 0,
         var kdsIdState: InputStateWrapper,
+        var rsnoState: InputStateWrapper,
         var localIpState: InputStateWrapper,
         var languageState: InputStateWrapper,
         var itemDisplayLanState: InputStateWrapper,
@@ -69,6 +70,7 @@ class CentralContract {
         var printOrder: Order? = null,
         var printerInfo: ArrayList<Map<String, String>>? = null,
         var printStatus: PrintStatus = PrintStatus.Idle,
+        var setStatusGkidGid: Pair<String,String>? = null,   //setSellStatus之後紀錄改變了哪一個，在filter list中找到並更新
     ) : UiState
 
     sealed class Effect : UiEffect {

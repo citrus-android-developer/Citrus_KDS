@@ -41,7 +41,7 @@ interface AppModule {
                 .addInterceptor {
                     val request = it.request().newBuilder()
                         .addHeader(
-                            "API_Key",
+                            "ApiKey",
                             "CitrusCompassKDS".sha3_256()
                         ).addHeader("Content-Type", "application/json")
                         .build()

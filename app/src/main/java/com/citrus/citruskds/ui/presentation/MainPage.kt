@@ -54,6 +54,8 @@ import com.citrus.citruskds.ui.presentation.widget.OrderItemWithOK
 import com.citrus.citruskds.ui.presentation.widget.TextClock
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorPrimary
+import com.citrus.citruskds.util.Constants.PREPARED
+import com.citrus.citruskds.util.Constants.PROGRESSING
 import com.citrus.citruskds.util.InputStateWrapper
 import com.citrus.citruskds.util.TextInputField
 import com.citrus.citruskds.util.pressClickEffect
@@ -276,23 +278,23 @@ private fun MainFeatureBtn(
                 onClick = {
 
                     Timber.d("order status click: $status")
-                    if (orderStatus == "O") {
+                    if (orderStatus == PREPARED) {
                         collected()
                         return@Button
                     }
 
-                    if (orderStatus != "W" && prefs.isPrepareEnable) {
-                        orderStatus = "W"
+                    if (orderStatus != PROGRESSING && prefs.isPrepareEnable) {
+                        orderStatus = PROGRESSING
                         progressing()
                     } else {
                         finish()
                     }
                 },
-                colors = ButtonDefaults.buttonColors(if (orderStatus != "W" || !prefs.isPrepareEnable) (if (orderStatus == "O") ColorPrimary else ColorBlue) else ColorPrimary),
+                colors = ButtonDefaults.buttonColors(if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) ColorPrimary else ColorBlue) else ColorPrimary),
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(
                     4.dp,
-                    if (orderStatus != "W" || !prefs.isPrepareEnable) (if (orderStatus == "O") ColorPrimary else ColorBlue) else ColorPrimary
+                    if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) ColorPrimary else ColorBlue) else ColorPrimary
                 ),
                 modifier = Modifier
                     .pressClickEffect {}
@@ -303,7 +305,7 @@ private fun MainFeatureBtn(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Timber.d("order status~: $status")
-                    if (orderStatus.uppercase() == "W" && prefs.isPrepareEnable) {
+                    if (orderStatus.uppercase() == PROGRESSING && prefs.isPrepareEnable) {
                         CircularProgressIndicator(
                             color = Color.White,
                             strokeWidth = 2.dp,
@@ -322,7 +324,7 @@ private fun MainFeatureBtn(
                     }
 
                     Text(
-                        text = stringResource(id = if (orderStatus != "W" || !prefs.isPrepareEnable) (if (orderStatus == "O") R.string.prepared else R.string.prepare) else R.string.preparing),
+                        text = stringResource(id = if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) R.string.prepared else R.string.prepare) else R.string.preparing),
                         color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
@@ -332,7 +334,7 @@ private fun MainFeatureBtn(
             }
         }
 
-        if (orderStatus == "W" && prefs.isPrepareEnable) {
+        if (orderStatus == PROGRESSING && prefs.isPrepareEnable) {
             Text(
                 text = "click to finish",
                 color = Color.Black.copy(alpha = 0.8f),
