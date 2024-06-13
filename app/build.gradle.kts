@@ -78,9 +78,10 @@ dependencies {
     implementation("androidx.compose.material:material")
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
-    /** 版更 Ktor*/
-    implementation("io.ktor:ktor-client-android:1.2.2")
-    implementation("io.ktor:ktor-client-cio:1.2.2")
+    val ktorVersion = "2.3.10"
+    implementation("io.ktor:ktor-client-android:$ktorVersion")
+    implementation("io.ktor:ktor-client-cio:$ktorVersion")
+    implementation("io.ktor:ktor-client-serialization-jvm:$ktorVersion")
 
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.constraintlayout:constraintlayout-compose:1.0.1")

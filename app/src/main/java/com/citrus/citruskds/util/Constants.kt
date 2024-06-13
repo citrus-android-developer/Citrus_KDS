@@ -30,8 +30,8 @@ object Constants {
     const val POS_GET_ORDER_READY_INFO = "/controller/OrdersList"
 
 
-    const val BASE_URL = "https://lab.citrus.tw/CompassKDS/"
-    //const val BASE_URL = "https://global.citrus.tw/CompassKiosk/"
+    const val BASE_URL = "https://global.citrus.tw/CompassKDS/"
+    //const val BASE_URL = "https://lab.citrus.tw/CompassKDS/"
 
 
     var df = DecimalFormat("#,###,##0.###")

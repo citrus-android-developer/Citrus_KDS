@@ -19,6 +19,8 @@ import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.domain.ApiRepositoryImpl
+import com.citrus.citruskds.ui.presentation.usecase.DownloadStatus
+import com.citrus.citruskds.ui.presentation.usecase.KtorDownloadUseCase
 import com.citrus.citruskds.util.BaseViewModel
 import com.citrus.citruskds.util.Constants.COLLECTED
 import com.citrus.citruskds.util.Constants.PREPARED
@@ -52,7 +54,8 @@ import javax.inject.Inject
 @HiltViewModel
 class CentralViewModel @Inject constructor(
     private val repository: ApiRepositoryImpl,
-    private val printerDetecter: PrinterDetecter
+    private val printerDetecter: PrinterDetecter,
+    private val downloadApkUseCase: KtorDownloadUseCase,
 ) : BaseViewModel<CentralContract.Event, CentralContract.State, CentralContract.Effect>() {
 
     private var orderInfoJob: Job? = null
@@ -60,6 +63,8 @@ class CentralViewModel @Inject constructor(
     private var orderReadyJob: Job? = null
 
     private var animateBufferGap = false
+
+    private var updateJob: Job? = null
 
 
     init {
@@ -249,6 +254,17 @@ class CentralViewModel @Inject constructor(
                 setState {
                     copy(errMsg = null, printStatus = PrintStatus.Idle)
                 }
+            }
+
+            is CentralContract.Event.IntentToUpdateVersion -> {
+                intentDownloadApk(event.version)
+            }
+
+            is CentralContract.Event.OnDismissDownloadApkDialog -> {
+                setState {
+                    copy(downloadStatus = null)
+                }
+                cancelDownloadApkJob()
             }
 
             is CentralContract.Event.onVerifyCancel -> {
@@ -453,6 +469,24 @@ class CentralViewModel @Inject constructor(
     }
 
 
+    /** 更版 **/
+    private fun intentDownloadApk(version: String) {
+        updateJob = viewModelScope.launch {
+            downloadApkUseCase.downloadApk(version, onProgressCallBack = {
+                setState {
+                    copy(downloadStatus = DownloadStatus.Progress(it))
+                }
+            }).collect {
+                setState {
+                    copy(downloadStatus = it)
+                }
+                if (it == DownloadStatus.Success) {
+                    setEffect { CentralContract.Effect.DownloadApkSuccess }
+                }
+            }
+        }
+    }
+
     private fun getDefaultPageByLan(): String {
         var defaultPage = prefs.defaultPage
         if (prefs.language == "华文") {
@@ -555,37 +589,9 @@ class CentralViewModel @Inject constructor(
             }
         }
 
-
-//    private fun setInventory(stockInfo: StockInfo) = viewModelScope.launch {
-//        repository.setInventory(
-//            setInventoryRequest = SetInventoryRequest(
-//                gID = stockInfo.gID!!,
-//                gKID = stockInfo.gKID!!,
-//                stock = stockInfo.stock!!.toInt()
-//            )
-//        ).collect { result ->
-//            when (result) {
-//                is Result.Loading -> {
-//                    Timber.d("setInventory: ${result.isLoading}")
-//                }
-//
-//                is Result.Success -> {
-//                    Timber.d("setInventory: Success")
-//                    fetchStockInfo()
-//                }
-//
-//                is Result.Error -> {
-//                    when (result.error) {
-//                        is NetworkError -> {
-//                            setState {
-//                                copy(errMsg = result.error.asUiText())
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//    }
+    private fun cancelDownloadApkJob() {
+        updateJob?.cancel()
+    }
 
 
     private fun setOrdersNotify(orderNo: String) = viewModelScope.launch {
@@ -614,7 +620,7 @@ class CentralViewModel @Inject constructor(
                     Timber.d("setOrderStatus: ${result.data}")
                     if (status == PREPARED || status == COLLECTED) {
 
-                        if(status == PREPARED) {
+                        if (status == PREPARED) {
                             setOrdersNotify(orderNo)
                         }
 

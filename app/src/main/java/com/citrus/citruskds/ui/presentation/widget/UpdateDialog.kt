@@ -65,7 +65,7 @@ import timber.log.Timber
 @Composable
 fun UpdateDialog(
     onDismissRequest: () -> Unit,
-    finish: (Pair<String, String>) -> Unit,
+    finish: (String) -> Unit,
     onCancel: () -> Unit
 ) {
 
@@ -180,9 +180,7 @@ fun UpdateDialog(
                         onClick = {
                             if (state.state.text.toString().isNotBlank()) {
                                 finish(
-                                    state.state.text.toString() to context.packageManager.getPackageInfo(
-                                        context.packageName, 0
-                                    ).versionName
+                                    state.state.text.toString()
                                 )
                             }
                         },

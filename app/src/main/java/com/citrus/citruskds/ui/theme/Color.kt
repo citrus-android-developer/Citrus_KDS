@@ -43,6 +43,7 @@ val ColorPrimaryDart = Color(0xFF64593B)
 
 
 val ColorTextPrimaryColor = Color(0xFF3F3E3E)
+val ColorAccent = Color(0xFF8D4022)
 
 
 fun Color.lighten(factor: Float): Color {
