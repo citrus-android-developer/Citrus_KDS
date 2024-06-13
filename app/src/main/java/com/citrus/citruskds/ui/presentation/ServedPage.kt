@@ -54,7 +54,7 @@ import com.citrus.citruskds.util.pressClickEffect
 
 @Composable
 fun ServedPage(
-    viewModel: CentralViewModel
+    viewModel: CentralViewModel,
 ) {
     ServedContent(
         state = viewModel.currentState,
@@ -66,7 +66,7 @@ fun ServedPage(
 @Composable
 fun ServedContent(
     state: CentralContract.State,
-    event: (CentralContract.Event) -> Unit
+    event: (CentralContract.Event) -> Unit,
 ) {
     val columns = GridCells.Fixed(4)
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("no_data_2.json"))
@@ -125,11 +125,7 @@ fun ServedContent(
                         items(dataList.size, key = { index ->
                             index
                         }) { index ->
-                            AnimatedVisibility(
-                                visible = dataList[index].isVisible,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
+                            Box(modifier = Modifier.height(IntrinsicSize.Max)) {
                                 OrderItem(
                                     state = state,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -141,17 +137,16 @@ fun ServedContent(
                                         event(CentralContract.Event.CollectedOrder(dataList[index].orderNo))
                                     })
                                 }
-                            }
-
-                            AnimatedVisibility(
-                                visible = !dataList[index].isVisible,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                OrderItemWithOK(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    dataList[index]
-                                )
+                                this@Column.AnimatedVisibility(
+                                    visible = !dataList[index].isVisible,
+                                    enter = fadeIn(),
+                                    exit = fadeOut()
+                                ) {
+                                    OrderItemWithOK(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        dataList[index]
+                                    )
+                                }
                             }
                         }
                     }
@@ -201,7 +196,7 @@ private fun ServedFeatureBtn(reprint: () -> Unit, collected: () -> Unit) {
 
 
         Button(
-            onClick = {  },
+            onClick = { },
             colors = ButtonDefaults.buttonColors(Color.DarkGray),
             shape = RoundedCornerShape(10.dp),
             border = BorderStroke(4.dp, Color.DarkGray),

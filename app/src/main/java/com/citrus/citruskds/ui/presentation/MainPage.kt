@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,9 +18,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text2.input.TextFieldState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,7 +67,7 @@ import timber.log.Timber
 
 @Composable
 fun MainPage(
-    viewModel: CentralViewModel
+    viewModel: CentralViewModel,
 ) {
     MainContent(
         state = viewModel.currentState,
@@ -135,11 +138,7 @@ fun MainContent(
                         items(dataList.size, key = { index ->
                             index
                         }) { index ->
-                            AnimatedVisibility(
-                                visible = dataList[index].isVisible,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
+                            Box(modifier = Modifier.height(IntrinsicSize.Max)) {
                                 OrderItem(
                                     state = state,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -158,17 +157,17 @@ fun MainContent(
                                             event(CentralContract.Event.CollectedOrder(dataList[index].orderNo))
                                         })
                                 }
-                            }
 
-                            AnimatedVisibility(
-                                visible = !dataList[index].isVisible,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                OrderItemWithOK(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    dataList[index]
-                                )
+                                this@Column.AnimatedVisibility(
+                                    visible = !dataList[index].isVisible,
+                                    enter = fadeIn(),
+                                    exit = fadeOut()
+                                ) {
+                                    OrderItemWithOK(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        dataList[index]
+                                    )
+                                }
                             }
                         }
                     }
@@ -253,7 +252,7 @@ private fun MainFeatureBtn(
     viewAll: () -> Unit,
     finish: () -> Unit,
     progressing: () -> Unit,
-    collected: () -> Unit
+    collected: () -> Unit,
 ) {
 
     var orderStatus by remember(status.uppercase()) {
@@ -347,8 +346,24 @@ private fun MainFeatureBtn(
 }
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Preview(showBackground = true)
 @Composable
 fun GridItemPreview() {
-
+    MainContent(
+        state = CentralContract.State(
+            kdsIdState = InputStateWrapper(TextFieldState(prefs.kdsId)),
+            rsnoState = InputStateWrapper(TextFieldState(prefs.rsno)),
+            localIpState = InputStateWrapper(TextFieldState(prefs.localIp)),
+            languageState = InputStateWrapper(TextFieldState(prefs.language)),
+            itemDisplayLanState = InputStateWrapper(TextFieldState(prefs.itemDisplayLan)),
+            defaultPageState = InputStateWrapper(TextFieldState("0")),
+            servedSearchState = InputStateWrapper(TextFieldState("")),
+            recallSearchState = InputStateWrapper(TextFieldState("")),
+            stockTypeSelect = InputStateWrapper(TextFieldState("")),
+            stockSearchState = InputStateWrapper(TextFieldState("")),
+            printerState = InputStateWrapper(TextFieldState("s")),
+        ),
+        event = {}
+    )
 }

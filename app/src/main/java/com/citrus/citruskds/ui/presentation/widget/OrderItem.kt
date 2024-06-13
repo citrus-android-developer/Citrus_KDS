@@ -1,19 +1,11 @@
 package com.citrus.citruskds.ui.presentation.widget
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,18 +37,24 @@ fun OrderItem(
     state: CentralContract.State,
     modifier: Modifier,
     order: Order,
-    featureBtn: @Composable (Int) -> Unit
+    featureBtn: @Composable (Int) -> Unit,
 ) {
 
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
     val disPlayLan = state.displayLan
 
-    val bgColor = if (order.status == "O") {
-        ColorYellowBg
-    } else if (order.status == "F") {
-        ColorPinkBg
-    } else {
-        ColorWhiteBg
+    val bgColor = when (order.status) {
+        "O" -> {
+            ColorYellowBg
+        }
+
+        "F" -> {
+            ColorPinkBg
+        }
+
+        else -> {
+            ColorWhiteBg
+        }
     }
 
     val size = order.detail.size
@@ -89,70 +87,48 @@ fun OrderItem(
         elevation = CardDefaults.cardElevation(
             2.dp
         ),
-        modifier = modifier
-
-
     ) {
-        Box {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            modifier = Modifier
+                .padding(8.dp)
+        ) {
+            val no = order.orderNo
+            val shortNo = no.substring(0, 3) + "-" + no.takeLast(5)
+            Text(
+                text = stringResource(id = R.string.no) + shortNo,
+                color = ColorBlue,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .height((200 + ((size + flavorSize + addSize) * default)).dp)
-                    .padding(10.dp)
+                    .align(Alignment.CenterHorizontally)
+            )
+            Text(
+                text = stringResource(id = R.string.order_time) + order.orderTime.split(" ")[1],
+                color = Color.Black,
+                textAlign = TextAlign.End,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+            )
+            HorizontalDivider()
 
-            ) {
+            orderDetail.filter { it.gType != "S" }.forEachIndexed { index, data ->
 
-                Column {
-                    val no = order.orderNo
-                    val shortNo = no.substring(0, 3) + "-" + no.takeLast(5)
-                    Text(
-                        text = stringResource(id = R.string.no) + shortNo,
-                        color = ColorBlue,
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                    )
-                    Text(
-                        text = stringResource(id = R.string.order_time) + order.orderTime.split(" ")[1],
-                        color = Color.Black,
-                        textAlign = TextAlign.End,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                    )
-                }
+                val flavor = if (data.flavor.isNullOrBlank()) "" else "\n#${data.flavor}"
+                val add = if (data.addition.isNullOrBlank()) "" else "\n#${data.addition}"
 
-                HorizontalDivider()
+                OneLineItemInfo(
+                    data.eName,
+                    data.qty.toString(),
+                    flavor,
+                    add,
+                    index,
+                    data.middleDetail
+                )
+            }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .align(Alignment.Start),
-                    content = {
-
-                        items(orderDetail.filter { it.gType != "S" }.size) { index ->
-
-                            val data = orderDetail.filter { it.gType != "S" }[index]
-
-                            val flavor =
-                                if (data.flavor.isNullOrBlank()) "" else "\n#${data.flavor}"
-
-                            val add = if (data.addition.isNullOrBlank()) "" else "\n#${data.addition}"
-
-                            OneLineItemInfo(
-                                data.eName,
-                                data.qty.toString(),
-                                flavor,
-                                add,
-                                index,
-                                data.middleDetail
-                            )
-                        }
-                    })
-                HorizontalDivider()
-                Spacer(modifier = Modifier)
+            Box(modifier = Modifier.padding(top = 5.dp)) {
                 featureBtn(order.detail.size)
             }
         }
@@ -167,7 +143,7 @@ fun OneLineItemInfo(
     flavor: String,
     add: String,
     index: Int,
-    middleList: List<Detail>?
+    middleList: List<Detail>?,
 ) {
     Column(
         horizontalAlignment = Alignment.Start,
@@ -187,9 +163,9 @@ fun OneLineItemInfo(
 
         if (middleList != null) {
             //回圈方式產生text呈現ename
-            for (i in 0 until middleList.size) {
+            for (element in middleList) {
                 Text(
-                    text = " " + middleList[i].eName,
+                    text = " " + element.eName,
                     color = ColorBlue,
                     modifier = Modifier
                         .padding(start = 20.dp, top = 10.dp)
@@ -200,3 +176,15 @@ fun OneLineItemInfo(
         }
     }
 }
+
+//@Composable
+//@Preview
+//fun OrderItemPreview() {
+//    OrderItem(
+//        state = CentralContract.State(),
+//        modifier = Modifier.fillMaxSize(),
+//        order = Order(
+//            orderNo = "202107010001",
+//            orderTime = "2021-07-01 12:00:00",
+//    ) {}
+//}

@@ -53,7 +53,7 @@ import com.citrus.citruskds.util.pressClickEffect
 
 @Composable
 fun RecallPage(
-    viewModel: CentralViewModel
+    viewModel: CentralViewModel,
 ) {
     RecallContent(
         state = viewModel.currentState,
@@ -65,7 +65,7 @@ fun RecallPage(
 @Composable
 fun RecallContent(
     state: CentralContract.State,
-    event: (CentralContract.Event) -> Unit
+    event: (CentralContract.Event) -> Unit,
 ) {
     val columns = GridCells.Fixed(4)
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("no_data_2.json"))
@@ -124,11 +124,8 @@ fun RecallContent(
                         items(dataList.size, key = { index ->
                             index
                         }) { index ->
-                            AnimatedVisibility(
-                                visible = dataList[index].isVisible,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
+
+                            Box(modifier = Modifier.height(IntrinsicSize.Max)) {
                                 OrderItem(
                                     state = state,
                                     modifier = Modifier
@@ -141,19 +138,17 @@ fun RecallContent(
                                         event(CentralContract.Event.RecallOrder(dataList[index].orderNo))
                                     })
                                 }
+                                this@Column.AnimatedVisibility(
+                                    visible = !dataList[index].isVisible,
+                                    enter = fadeIn(),
+                                    exit = fadeOut()
+                                ) {
+                                    OrderItemWithOK(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        dataList[index]
+                                    )
+                                }
                             }
-
-                            AnimatedVisibility(
-                                visible = !dataList[index].isVisible,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                OrderItemWithOK(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    dataList[index]
-                                )
-                            }
-
                         }
                     }
                 }
@@ -192,9 +187,6 @@ private fun RecallFeatureBtn(status: String, noShow: () -> Unit, reCall: () -> U
 
                 }
                 .weight(1f)
-                .padding(start = 10.dp)
-
-
         ) {
 
             Row(
