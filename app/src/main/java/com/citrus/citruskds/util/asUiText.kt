@@ -7,32 +7,75 @@ import com.citrus.citruskds.commonData.Result
 
 fun NetworkError.asUiText(): UiText {
     return when (this) {
-        is NetworkError.DataFetchFailed -> UiText.StringResource(
-            R.string.data_fetch_error
+        is NetworkError.DataFetchFailed -> UiText.MultiUiText(
+            listOf(
+                UiText.StringResource(
+                    R.string.data_fetch_error
+                ), UiText.DynamicString(errMsg ?: "")
+            )
         )
 
-        NetworkError.HttpError -> UiText.StringResource(
-            R.string.http_error
+        is NetworkError.HttpError -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.http_error, arrayOf(code)
+                )
+            )
         )
 
-        NetworkError.NoInternet -> UiText.StringResource(
-            R.string.no_internet_error
+        is NetworkError.NoInternet -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.no_internet_error
+                )
+            )
         )
 
-        NetworkError.RequestTimeout -> UiText.StringResource(
-            R.string.the_request_timed_out
+        is NetworkError.RequestTimeout -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.the_request_timed_out
+                )
+            )
         )
 
-        NetworkError.Serialization -> UiText.StringResource(
-            R.string.json_serialization_error
+        is NetworkError.Serialization -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.json_serialization_error
+                )
+            )
         )
 
-        NetworkError.ServerError -> UiText.StringResource(
-            R.string.server_error
+        is NetworkError.ServerError -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.server_error
+                )
+            )
         )
 
-        NetworkError.UnknownError -> UiText.StringResource(
-            R.string.unknown_error
+        is NetworkError.ConnectionError -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.connection_error
+                )
+            )
+        )
+
+        is NetworkError.UnknownError -> UiText.MultiUiText(
+            listOf(
+                UiText.DynamicString(errMsg ?: ""),
+                UiText.StringResource(
+                    R.string.unknown_error
+                )
+            )
         )
     }
 }

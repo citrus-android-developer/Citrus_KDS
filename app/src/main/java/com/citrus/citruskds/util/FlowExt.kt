@@ -16,19 +16,24 @@ import kotlinx.coroutines.flow.retryWhen
 import retrofit2.HttpException
 import timber.log.Timber
 import java.io.IOException
+import java.net.ConnectException
 import java.net.UnknownHostException
 
 /**基於sandwich進一步封裝含retry功能、error錯誤處理,僅抽出success各自實作*/
 /**crossInline：讓函數類型的參數可以被間接調用，但無法return*/
 /**noInline：函數類型的參數在inline時會無法被當成對象來使用，需用noinline局部關閉inline效果*/
-fun <T> resultFlowData(apiAction: suspend () -> ApiResult<T>, isNeedLoading: Boolean = true) =
+fun <T> resultFlowData(
+    apiAction: suspend () -> ApiResult<T>,
+    isNeedLoading: Boolean = true,
+    feature: String
+) =
     flow {
         val apiActionResult = apiAction()
         emit(if (apiActionResult.status != "1") {
             Timber.d("api error: ${apiActionResult.error?.message}")
             Result.Error<T, RootError>(
                 NetworkError.DataFetchFailed(
-                    errMsg = apiActionResult.error?.message
+                    errMsg = feature + apiActionResult.error?.message
                 )
             )
         } else {
@@ -37,10 +42,13 @@ fun <T> resultFlowData(apiAction: suspend () -> ApiResult<T>, isNeedLoading: Boo
                 Result.Success<T, RootError>(data = it)
             } ?: Result.Success(Unit)
         })
-    }.retryWithPolicy(isNeedLoading)
+    }.retryWithPolicy(isNeedLoading, feature)
 
 
-fun <T> Flow<Result<T, RootError>>.retryWithPolicy(isNeedLoading: Boolean): Flow<Result<T, RootError>> {
+fun <T> Flow<Result<T, RootError>>.retryWithPolicy(
+    isNeedLoading: Boolean,
+    feature: String
+): Flow<Result<T, RootError>> {
     return this.retryWhen { cause, attempt ->
         val delayTime = when (attempt) {
             0L -> 3000L
@@ -55,40 +63,47 @@ fun <T> Flow<Result<T, RootError>>.retryWithPolicy(isNeedLoading: Boolean): Flow
         } else {
             emit(
                 Result.Error(
-                    NetworkError.RequestTimeout
+                    NetworkError.RequestTimeout(errMsg = feature)
                 )
             )
             return@retryWhen false
         }
-    }.onIfLoadingAndCatch(isNeedLoading)
+    }.onIfLoadingAndCatch(isNeedLoading, feature)
 }
 
-fun <T> Flow<Result<T, RootError>>.onIfLoadingAndCatch(isNeedLoading: Boolean): Flow<Result<T, RootError>> {
+fun <T> Flow<Result<T, RootError>>.onIfLoadingAndCatch(
+    isNeedLoading: Boolean,
+    feature: String
+): Flow<Result<T, RootError>> {
     return this.onStart {
         if (isNeedLoading) {
             emit(Result.Loading(true))
         }
     }.catch { e ->
-        Timber.d("api error: ${e.message}")
+        Timber.d("api error: ${e}")
         when (e) {
             is UnknownHostException -> {
-                emit(Result.Error(NetworkError.NoInternet))
+                emit(Result.Error(NetworkError.NoInternet(errMsg = feature)))
             }
 
             is HttpException -> {
                 val error = when (e.code()) {
-                    408 -> NetworkError.RequestTimeout
-                    else -> NetworkError.HttpError
+                    408 -> NetworkError.RequestTimeout(errMsg = feature)
+                    else -> NetworkError.HttpError(e.code().toString(), errMsg = feature)
                 }
                 emit(Result.Error(error))
             }
 
             is JsonParseException -> {
-                emit(Result.Error(NetworkError.Serialization))
+                emit(Result.Error(NetworkError.Serialization(errMsg = feature)))
+            }
+
+            is ConnectException -> {
+                emit(Result.Error(NetworkError.ConnectionError(errMsg = feature)))
             }
 
             else -> {
-                emit(Result.Error(NetworkError.UnknownError))
+                emit(Result.Error(NetworkError.UnknownError(errMsg = feature)))
             }
         }
     }.flowOn(Dispatchers.IO)

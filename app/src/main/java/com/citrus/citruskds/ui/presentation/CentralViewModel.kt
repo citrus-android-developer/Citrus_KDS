@@ -563,6 +563,7 @@ class CentralViewModel @Inject constructor(
                                     copy(errMsg = result.error.asUiText())
                                 }
                             }
+                            else -> Unit
                         }
                     }
                 }
@@ -601,7 +602,28 @@ class CentralViewModel @Inject constructor(
                 storeNo = prefs.rsno,
                 orderNo = orderNo
             )
-        ).collect()
+        ).collect { result ->
+            when (result) {
+                is Result.Loading -> {
+                    Timber.d("setOrdersNotify: ${result.isLoading}")
+                }
+
+                is Result.Success -> {
+                    Timber.d("setOrdersNotify: ${result.data}")
+                }
+
+                is Result.Error -> {
+                    when (result.error) {
+                        is NetworkError -> {
+                            setState {
+                                copy(errMsg = result.error.asUiText())
+                            }
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
     }
 
     private fun setOrderStatus(orderNo: String, status: String) = viewModelScope.launch {
@@ -620,7 +642,7 @@ class CentralViewModel @Inject constructor(
                     Timber.d("setOrderStatus: ${result.data}")
                     if (status == PREPARED || status == COLLECTED) {
 
-                        if (status == PREPARED) {
+                        if (status == PREPARED && orderNo.startsWith("E")) {
                             setOrdersNotify(orderNo)
                         }
 
@@ -662,6 +684,8 @@ class CentralViewModel @Inject constructor(
                                 copy(errMsg = result.error.asUiText())
                             }
                         }
+
+                        else -> Unit
                     }
                 }
 
@@ -706,6 +730,7 @@ class CentralViewModel @Inject constructor(
                                 copy(errMsg = result.error.asUiText())
                             }
                         }
+                        else -> Unit
                     }
                 }
             }
@@ -754,6 +779,7 @@ class CentralViewModel @Inject constructor(
                         is NetworkError -> {
                             result.error.asUiText()
                         }
+                        else -> Unit
                     }
                 }
             }
@@ -798,6 +824,7 @@ class CentralViewModel @Inject constructor(
                                 copy(errMsg = result.error.asUiText())
                             }
                         }
+                        else -> Unit
                     }
                 }
             }

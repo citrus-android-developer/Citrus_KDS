@@ -27,11 +27,12 @@
     <string name="setting">Setting</string>
     <string name="collected">Collected</string>
     <string name="data_fetch_error">Data fetch error</string>
-    <string name="http_error">Http error occur</string>
+    <string name="http_error">(%1$s) Http error occur</string>
     <string name="no_internet_error">No network connection currently</string>
     <string name="the_request_timed_out">Request timed out</string>
     <string name="json_serialization_error">Json parsed error</string>
     <string name="server_error">Server error occur</string>
+    <string name="connection_error">Connect error, please check the Pos IP</string>
     <string name="unknown_error">Unknown error occur</string>
     <string name="no_result">No matching search results</string>
     <string name="please_select_type">Please select an item category</string>

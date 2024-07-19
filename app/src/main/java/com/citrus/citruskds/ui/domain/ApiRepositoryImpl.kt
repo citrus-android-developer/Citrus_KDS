@@ -37,7 +37,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                     kdsId = prefs.kdsId, type = type
                 )
             )
-        }) as Flow<Result<List<Order>, RootError>>
+        }, feature = "GetOrder: ") as Flow<Result<List<Order>, RootError>>
 
     override suspend fun setOrderStatus(setOrderStatusRequest: SetOrderStatusRequest): Flow<Result<Int, RootError>> =
         resultFlowData(apiAction = {
@@ -45,21 +45,21 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                 url = "http://" + prefs.localIp + POS_SET_ORDER_STATUS,
                 setOrderStatusRequest = setOrderStatusRequest
             )
-        }) as Flow<Result<Int, RootError>>
+        }, feature = "SetOrderStatus: ") as Flow<Result<Int, RootError>>
 
     override suspend fun getStockInfo(): Flow<Result<List<StockInfo>, RootError>> =
         resultFlowData(apiAction = {
             apiService.getStockInfo(
                 url = "http://" + prefs.localIp + POS_GET_STOCK_INFO
             )
-        }) as Flow<Result<List<StockInfo>, RootError>>
+        }, feature = "GetStockInfo: ") as Flow<Result<List<StockInfo>, RootError>>
 
     override suspend fun getOrderReadyInfo(): Flow<Result<List<OrderReadyInfo>, RootError>> =
         resultFlowData(apiAction = {
             apiService.getOrderReadyInfo(
                 url = "http://" + prefs.localIp + POS_GET_ORDER_READY_INFO
             )
-        }) as Flow<Result<List<OrderReadyInfo>, RootError>>
+        }, feature = "GetOrderReadyInfo: ") as Flow<Result<List<OrderReadyInfo>, RootError>>
 
     override suspend fun setInventory(setInventoryRequest: SetInventoryRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {
@@ -67,7 +67,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                 url = "http://" + prefs.localIp + POS_SET_INVENTORY,
                 setInventoryRequest = setInventoryRequest
             )
-        }) as Flow<Result<Unit, RootError>>
+        }, feature = "SetInventory: ") as Flow<Result<Unit, RootError>>
 
     override suspend fun setSellStatus(setItemSellStatusRequest: SetItemSellStatusRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {
@@ -75,7 +75,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                 url = "http://" + prefs.localIp + POS_SET_SELL_STATUS,
                 setItemSellStatusRequest = setItemSellStatusRequest
             )
-        }) as Flow<Result<Unit, RootError>>
+        }, feature = "SetSellStatus: ") as Flow<Result<Unit, RootError>>
 
     override suspend fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {
@@ -83,7 +83,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                 url = Constants.BASE_URL + SERVER_SET_SELL_STATUS,
                 setItemSellStatusRequest = setItemSellStatusRequest
             )
-        }) as Flow<Result<Unit, RootError>>
+        }, feature = "SetSellStatusRemote: ") as Flow<Result<Unit, RootError>>
 
     override suspend fun setOrdersNotifyRemote(ordersNotifyRequest: OrdersNotifyRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {
@@ -91,7 +91,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                 url = Constants.BASE_URL + SERVER_SET_ORDERS_NOTIFY,
                 ordersNotifyRequest = ordersNotifyRequest
             )
-        }) as Flow<Result<Unit, RootError>>
+        }, feature = "SetOrdersNotify: ") as Flow<Result<Unit, RootError>>
 
 
 }

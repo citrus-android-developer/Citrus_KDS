@@ -209,7 +209,7 @@ fun KdsScreen(
                 .align(Alignment.CenterHorizontally)
                 .padding(horizontal = 20.dp, vertical = 6.dp)
                 .clickable {
-                    //askUpdate()
+                    askUpdate()
                 },
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,

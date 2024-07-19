@@ -32,6 +32,7 @@
     <string name="the_request_timed_out">连线逾时</string>
     <string name="json_serialization_error">Json解析错误</string>
     <string name="server_error">伺服器发生错误</string>
+    <string name="connection_error">连线失败, 请检查Pos IP</string>
     <string name="unknown_error">发生未知的错误</string>
     <string name="no_result">没有匹配的搜寻结果</string>
     <string name="please_select_type">请选择品项分类</string>

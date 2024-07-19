@@ -144,7 +144,10 @@ fun RecallContent(
                                     exit = fadeOut()
                                 ) {
                                     OrderItemWithOK(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.padding(
+                                            horizontal = 8.dp,
+                                            vertical = 4.dp
+                                        ),
                                         dataList[index]
                                     )
                                 }
@@ -188,7 +191,6 @@ private fun RecallFeatureBtn(status: String, noShow: () -> Unit, reCall: () -> U
                 }
                 .weight(1f)
         ) {
-
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
