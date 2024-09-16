@@ -522,7 +522,10 @@ class CentralViewModel @Inject constructor(
         orderReadyJob?.cancel()
     }
 
-    private fun setSellStatus(setItemSellStatusRequest: SetItemSellStatusRequest) =
+    private fun setSellStatus(
+        setItemSellStatusRequest: SetItemSellStatusRequest,
+        isUpdateServer: Boolean = true
+    ) {
         viewModelScope.launch {
             repository.setSellStatus(setItemSellStatusRequest).collect { result ->
                 when (result) {
@@ -550,12 +553,17 @@ class CentralViewModel @Inject constructor(
                             )
                         }
 
-                        setSellStatusRemote(setItemSellStatusRequest)
+                        if (isUpdateServer) {
+                            setSellStatusRemote(setItemSellStatusRequest)
+                        }
+
                     }
 
                     is Result.Error -> {
                         Timber.d("setSellStatus: err occur")
                         Timber.d("setSellStatus: ${result.error}")
+
+
                         when (result.error) {
                             is NetworkError -> {
                                 Timber.d("setSellStatus 123: ${result.error.asUiText()}")
@@ -563,15 +571,17 @@ class CentralViewModel @Inject constructor(
                                     copy(errMsg = result.error.asUiText())
                                 }
                             }
+
                             else -> Unit
                         }
                     }
                 }
             }
         }
+    }
 
 
-    private fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest) =
+    private fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest) {
         viewModelScope.launch {
             repository.setSellStatusRemote(setItemSellStatusRequest).collect { result ->
                 when (result) {
@@ -584,11 +594,31 @@ class CentralViewModel @Inject constructor(
                     }
 
                     is Result.Error -> {
-                        Timber.d("setSellStatus Remote: ${result.error}")
+                        val status = setItemSellStatusRequest.status
+                        setItemSellStatusRequest.status =
+                            if (status == "Available") "Sold out" else "Available"
+
+                        setSellStatus(
+                            setItemSellStatusRequest = setItemSellStatusRequest,
+                            isUpdateServer = false
+                        )
+
+
+                        when (result.error) {
+                            is NetworkError -> {
+                                Timber.d("setSellStatus 123: ${result.error.asUiText()}")
+                                setState {
+                                    copy(errMsg = result.error.asUiText())
+                                }
+                            }
+
+                            else -> Unit
+                        }
                     }
                 }
             }
         }
+    }
 
     private fun cancelDownloadApkJob() {
         updateJob?.cancel()
@@ -619,6 +649,7 @@ class CentralViewModel @Inject constructor(
                                 copy(errMsg = result.error.asUiText())
                             }
                         }
+
                         else -> Unit
                     }
                 }
@@ -730,6 +761,7 @@ class CentralViewModel @Inject constructor(
                                 copy(errMsg = result.error.asUiText())
                             }
                         }
+
                         else -> Unit
                     }
                 }
@@ -779,6 +811,7 @@ class CentralViewModel @Inject constructor(
                         is NetworkError -> {
                             result.error.asUiText()
                         }
+
                         else -> Unit
                     }
                 }
@@ -824,6 +857,7 @@ class CentralViewModel @Inject constructor(
                                 copy(errMsg = result.error.asUiText())
                             }
                         }
+
                         else -> Unit
                     }
                 }
