@@ -31,8 +31,8 @@ object Constants {
 
 
     //
-     const val BASE_URL = "https://global.citrus.tw/CompassKDS/"
-    //const val BASE_URL = "https://lab.citrus.tw/CompassKDS/"
+    //const val BASE_URL = "https://global.citrus.tw/CompassKDS/"
+    const val BASE_URL = "https://lab.citrus.tw/CompassKDS/"
 
 
     var df = DecimalFormat("#,###,##0.###")
@@ -67,14 +67,15 @@ object Constants {
 
     /**status:J*/
     const val NEW = "J"
+
     /**status:O*/
     const val PREPARED = "O"
+
     /**status:W*/
     const val PROGRESSING = "W"
+
     /**status:F*/
     const val COLLECTED = "F"
-
-
 
 
     /**Fail Message Type*/
