@@ -32,7 +32,7 @@ object Constants {
 
     //
     //const val BASE_URL = "https://global.citrus.tw/CompassKDS/"
-    const val BASE_URL = "https://lab.citrus.tw/CompassKDS/"
+    const val BASE_URL = "https://global.citrus.tw/CompassKDS_UAT/"
 
 
     var df = DecimalFormat("#,###,##0.###")
