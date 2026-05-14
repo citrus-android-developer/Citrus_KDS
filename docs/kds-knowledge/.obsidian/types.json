@@ -8,6 +8,7 @@
     "created": "date",
     "updated": "date",
     "summary": "text",
-    "priority": "text"
+    "priority": "text",
+    "decisions": "multitext"
   }
 }
