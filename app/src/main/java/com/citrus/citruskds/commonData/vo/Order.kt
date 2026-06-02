@@ -14,6 +14,8 @@ data class Order(
     var serviceType: String,
     @Json(name = "Status")
     var status: String,
+    @Json(name = "Note")
+    var note: String? = null,
     @Json(ignore = true)
     var isVisible: Boolean = true
 )

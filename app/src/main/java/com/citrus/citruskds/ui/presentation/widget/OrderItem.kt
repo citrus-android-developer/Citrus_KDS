@@ -94,8 +94,9 @@ fun OrderItem(
         ) {
             val no = order.orderNo
             val shortNo = no.substring(0, 3) + "-" + no.takeLast(5)
+            val pager = if (order.note.isNullOrBlank()) "" else " (${order.note})"
             Text(
-                text = stringResource(id = R.string.no) + shortNo,
+                text = stringResource(id = R.string.no) + shortNo + pager,
                 color = ColorBlue,
                 textAlign = TextAlign.Center,
                 fontWeight = FontWeight.Bold,
