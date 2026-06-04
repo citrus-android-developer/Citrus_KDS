@@ -82,3 +82,7 @@ if (!prefs.firstInstall && prefs.localIp.isNotBlank()
 - **根因**：`HorizontalPager { page -> ReadyForPage(selectedTabIndex, ...) }` —— 每頁都用**全域 selectedTabIndex** 渲染（非自己的 page），切 tab 動畫過半 currentPage 一變、兩個分頁位置同時抽換內容 → 殘影。
 - **修法**：改成 `ReadyForPage(page, ...)`、`ReadyForPage(page:Int)` 用 `when(page)`，每頁畫自己的內容；tab onClick 維持 animateScrollToPage。
 - 驗證：build 綠燈、已上機。
+
+
+## 2026-06-04 語系套用移除
+移除原本的 `context.resources.updateConfiguration(...)`（已棄用、不通知 Compose）。語系改由 [[MainActivity]] 的 `CompositionLocalProvider` 統一提供 LocalConfiguration/LocalContext。詳見 [[ISSUE-語系切換套用不一致]]。
