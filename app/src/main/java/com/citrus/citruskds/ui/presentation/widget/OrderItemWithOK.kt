@@ -1,21 +1,20 @@
 package com.citrus.citruskds.ui.presentation.widget
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.ui.theme.ColorPinkBg
@@ -26,6 +25,12 @@ import com.citrus.citruskds.ui.theme.ColorYellowBg
 fun OrderItemWithOK(modifier: Modifier, order: Order) {
 
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
+    // 加速播放：原始 1.5s（90 frames@60fps）÷ 1.5x ≈ 1s
+    val progress by animateLottieCompositionAsState(
+        composition,
+        iterations = 1,
+        speed = 1.5f,
+    )
 
     val bgColor = if (order.status == "O") {
         ColorYellowBg
@@ -34,18 +39,22 @@ fun OrderItemWithOK(modifier: Modifier, order: Order) {
     } else {
         ColorWhiteBg
     }
-    
+
     Box(
         modifier = modifier
             .fillMaxSize()
+            .clip(RoundedCornerShape(10.dp))
             .background(bgColor.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
     ) {
 
         LottieAnimation(
-            modifier = Modifier
-                .height(280.dp)
-                .align(Alignment.Center),
             composition = composition,
+            progress = { progress },
+            contentScale = ContentScale.Fit,   // 縮放至卡片範圍內，不超出卡片
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .align(Alignment.Center),
         )
     }
 }

@@ -1,9 +1,13 @@
 package com.citrus.citruskds.ui.presentation
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +68,7 @@ fun ServedPage(
 }
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ServedContent(
     state: CentralContract.State,
@@ -124,9 +129,13 @@ fun ServedContent(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(dataList.size, key = { index ->
-                            index
+                            dataList[index].orderNo
                         }) { index ->
-                            Box(modifier = Modifier.height(IntrinsicSize.Max)) {
+                            Box(
+                                modifier = Modifier
+                                    .height(IntrinsicSize.Max)
+                                    .animateItemPlacement()   // 卡片移除時鄰近卡片平滑補位
+                            ) {
                                 OrderItem(
                                     state = state,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -140,8 +149,8 @@ fun ServedContent(
                                 }
                                 this@Column.AnimatedVisibility(
                                     visible = !dataList[index].isVisible,
-                                    enter = fadeIn(),
-                                    exit = fadeOut()
+                                    enter = scaleIn(initialScale = 0.8f, animationSpec = tween(220)) + fadeIn(tween(220)),
+                                    exit = scaleOut(targetScale = 0.8f, animationSpec = tween(200)) + fadeOut(tween(200))
                                 ) {
                                     OrderItemWithOK(
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

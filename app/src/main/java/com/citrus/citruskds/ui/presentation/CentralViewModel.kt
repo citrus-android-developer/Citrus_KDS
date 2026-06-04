@@ -902,7 +902,8 @@ class CentralViewModel @Inject constructor(
                 fetchOrders()
                 delay(3000)
             } else {
-                delay(1000)
+                // 延後刷新至完成動畫播完再移除卡片，避免動畫被砍掉
+                delay(OK_ANIMATION_BUFFER_MS)
                 animateBufferGap = false
                 fetchOrders()
             }
@@ -1134,5 +1135,10 @@ class CentralViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    companion object {
+        /** 完成動畫(operation_success.json 1.5s，以 1.5x 播放 ≈ 1s)的緩衝時間，含少量餘裕。 */
+        private const val OK_ANIMATION_BUFFER_MS = 1100L
     }
 }
