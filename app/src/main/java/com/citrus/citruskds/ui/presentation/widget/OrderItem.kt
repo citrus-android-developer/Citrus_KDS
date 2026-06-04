@@ -26,6 +26,11 @@ import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Detail
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.commonData.vo.additionDisplay
+import com.citrus.citruskds.commonData.vo.displayStatus
+import com.citrus.citruskds.commonData.vo.flavorDisplay
+import com.citrus.citruskds.commonData.vo.isComboMain
+import com.citrus.citruskds.commonData.vo.isSideDish
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.CentralContract
 import com.citrus.citruskds.ui.theme.ColorBlue
@@ -48,7 +53,7 @@ fun OrderItem(
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
     val disPlayLan = state.displayLan
 
-    val bgColor = when (order.status) {
+    val bgColor = when (order.displayStatus()) {
         "O" -> {
             ColorYellowBg
         }
@@ -69,12 +74,13 @@ fun OrderItem(
 
 
     val orderDetail = order.detail
-    //將detail迭代，如果gType為M，則將接下來gType為S的detail加入到M的MiddleDetail中
+    // 套餐主項：M(附餐為 S)/ G(附餐為 R)；兩種附餐都要收進主項的 middleDetail
+    //將detail迭代，套餐主項(M/G)後面接續的附餐(S/R)加入到主項的 middleDetail 中
     for (i in 0 until orderDetail.size) {
-        if (orderDetail[i].gType == "M" || orderDetail[i].gType == "G") {
+        if (orderDetail[i].isComboMain) {
             orderDetail[i].middleDetail = mutableListOf()
             for (j in i + 1 until orderDetail.size) {
-                if (orderDetail[j].gType == "S") {
+                if (orderDetail[j].isSideDish) {
                     orderDetail[i].middleDetail = orderDetail[i].middleDetail?.plus(orderDetail[j])
                 } else {
                     break
@@ -119,10 +125,12 @@ fun OrderItem(
             )
             HorizontalDivider()
 
-            orderDetail.filter { it.gType != "S" }.forEachIndexed { index, data ->
+            orderDetail.filter { !it.isSideDish }.forEachIndexed { index, data ->
 
-                val flavor = if (data.flavor.isNullOrBlank()) "" else "\n#${data.flavor}"
-                val add = if (data.addition.isNullOrBlank()) "" else "\n#${data.addition}"
+                val flavorStr = data.flavorDisplay(prefs.language)
+                val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
+                val addStr = data.additionDisplay(prefs.language)
+                val add = if (addStr.isBlank()) "" else "\n#$addStr"
 
                 OneLineItemInfo(
                     data.displayName(),
@@ -130,7 +138,8 @@ fun OrderItem(
                     flavor,
                     add,
                     index,
-                    data.middleDetail
+                    data.middleDetail,
+                    hideQty = data.isComboMain   // 套餐主項不顯示數量
                 )
             }
 
@@ -150,6 +159,7 @@ fun OneLineItemInfo(
     add: String,
     index: Int,
     middleList: List<Detail>?,
+    hideQty: Boolean = false,
 ) {
     Column(
         horizontalAlignment = Alignment.Start,
@@ -159,7 +169,8 @@ fun OneLineItemInfo(
             .let { if (index % 2 != 0) it.background(Color.White.copy(alpha = 0.5f)) else it },
     ) {
         Text(
-            text = "$qty x $name$flavor$add",
+            // 套餐主項(hideQty)只顯示名稱；其餘顯示「數量 x 名稱」
+            text = if (hideQty) "$name$flavor$add" else "$qty x $name$flavor$add",
             color = ColorBlue,
             modifier = Modifier
                 .padding(all = 5.dp)

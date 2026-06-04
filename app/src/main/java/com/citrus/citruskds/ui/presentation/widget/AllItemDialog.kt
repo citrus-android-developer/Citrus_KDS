@@ -34,6 +34,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.commonData.vo.flavorDisplay
+import com.citrus.citruskds.commonData.vo.isComboMain
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
@@ -100,10 +102,11 @@ fun AllItemDialog(
                         items(order.detail.size) { index ->
                             val name =
                                 if (prefs.language == "English") order.detail[index].eName else order.detail[index].cName
-                            val flavor =
-                                if (order.detail[index].flavor.isNullOrBlank()) "" else "\n#${order.detail[index].flavor}"
+                            val flavorStr = order.detail[index].flavorDisplay(prefs.language)
+                            val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
                             androidx.compose.material3.Text(
-                                text = "${order.detail[index].qty} x $name" + flavor,
+                                // 套餐主項(G/M)只顯示名稱、不顯示數量
+                                text = (if (order.detail[index].isComboMain) "" else "${order.detail[index].qty} x ") + name + flavor,
                                 color = ColorBlue,
                                 modifier = Modifier
                                     .fillMaxWidth()

@@ -111,23 +111,8 @@ fun KdsScreen(
 
 
     val context = LocalContext.current
-    val configuration = LocalConfiguration.current
 
-
-    LaunchedEffect(viewModel.currentState.languageState.state.text) {
-        val newLocale =
-            if (viewModel.currentState.languageState.state.text.toString() == "English") {
-                Locale("en")
-            } else {
-                Locale("zh")
-            }
-
-        val newConfiguration = Configuration(configuration).apply {
-            setLocale(newLocale)
-        }
-        context.resources.updateConfiguration(newConfiguration, context.resources.displayMetrics)
-    }
-
+    // 語系套用已移到 MainActivity 的 CompositionLocalProvider（單一來源、整棵樹一致重組）
 
     Column(
         modifier = Modifier
@@ -251,6 +236,12 @@ fun KdsScreen(
             onDismissRequest = {
                 printErrShowing = false
                 viewModel.setEvent(CentralContract.Event.onDismissErrorDialog)
+            },
+            // 列印失敗可重印上一張快照（含加點），不受狀態已升級影響
+            confirmText = if (prefs.language == "English") "Reprint" else "重印",
+            onConfirm = {
+                printErrShowing = false
+                viewModel.setEvent(CentralContract.Event.RetryPrintOrder)
             })
     }
 }

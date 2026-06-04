@@ -21,10 +21,11 @@ class CentralContract {
         data class IntentToUpdateVersion(val version: String) : Event()
         data class OnDefaultPageChanged(val page: String) : Event()
         data class OnStockTypeChanged(val type: String) : Event()
-        data class FinishOrder(val order: Order, val status: String = "O") : Event()
-        data class ProgressOrder(val order: Order, val status: String = "W") : Event()
-        data class CollectedOrder(val orderNo: String, val status: String = "F") : Event()
-        data class RecallOrder(val orderNo: String, val status: String = "O") : Event()
+        // fromStatus：只搬目前為這些來源狀態的品項（支援混合狀態/加點）
+        data class FinishOrder(val order: Order, val status: String = "O", val fromStatus: String = "W") : Event()
+        data class ProgressOrder(val order: Order, val status: String = "W", val fromStatus: String = "j,J") : Event()
+        data class CollectedOrder(val orderNo: String, val status: String = "F", val fromStatus: String = "O") : Event()
+        data class RecallOrder(val orderNo: String, val status: String = "O", val fromStatus: String = "O,F") : Event()
         data class OnStockItemClicked(val stockInfo: StockInfo) : Event()
         data class OnSetInventory(val stock: StockInfo) : Event()
         data class OnPrinterSelected(val info: Map<String, String>) : Event()
@@ -33,6 +34,8 @@ class CentralContract {
         data class ScanOrderNo(val orderNo: String) : Event()
         data object ReloadOrderReadyImages : Event()
         data class ReprintOrder(val order: Order) : Event()
+        /** 列印失敗後重印「上一張列印快照」(含加點子集與標記)，不受狀態已升級影響 */
+        data object RetryPrintOrder : Event()
         data object LoadStockList : Event()
         data class OnModeChanged(val mode: Int) : Event()
         data object startFetchKdsInfo : Event()
@@ -82,6 +85,8 @@ class CentralContract {
         var stockSearchState: InputStateWrapper,
         var errMsg: UiText? = null,
         var printOrder: Order? = null,
+        // 每次列印請求遞增；列印觸發改 key 在此，確保「重印同一張(含加點)」也能重觸發
+        var printRequestId: Int = 0,
         var printerInfo: ArrayList<Map<String, String>>? = null,
         var printStatus: PrintStatus = PrintStatus.Idle,
         var setStatusGkidGid: Pair<String, String>? = null,   //setSellStatus之後紀錄改變了哪一個，在filter list中找到並更新

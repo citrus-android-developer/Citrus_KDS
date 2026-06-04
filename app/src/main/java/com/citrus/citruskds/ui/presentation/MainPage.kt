@@ -53,6 +53,7 @@ import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.commonData.vo.displayStatus
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.widget.AllItemDialog
 import com.citrus.citruskds.ui.presentation.widget.OrderItem
@@ -153,7 +154,7 @@ fun MainContent(
                                     dataList[index]
                                 ) { itemCount ->
                                     MainFeatureBtn(
-                                        status = dataList[index].status,
+                                        status = dataList[index].displayStatus(),
                                         size = itemCount,
                                         viewAll = {
                                             viewOrder = dataList[index]
@@ -297,11 +298,12 @@ private fun MainFeatureBtn(
                         finish()
                     }
                 },
-                colors = ButtonDefaults.buttonColors(if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) ColorPrimary else ColorBlue) else ColorPrimary),
+                // 顏色一律依實際狀態：新單(J)=藍，製作中(W)/待取(O)=橘
+                colors = ButtonDefaults.buttonColors(if (orderStatus == PROGRESSING || orderStatus == PREPARED) ColorPrimary else ColorBlue),
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(
                     4.dp,
-                    if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) ColorPrimary else ColorBlue) else ColorPrimary
+                    if (orderStatus == PROGRESSING || orderStatus == PREPARED) ColorPrimary else ColorBlue
                 ),
                 modifier = Modifier
                     .pressClickEffect {}
@@ -322,7 +324,15 @@ private fun MainFeatureBtn(
                     )
 
                     Text(
-                        text = stringResource(id = if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) R.string.prepared else R.string.prepare) else R.string.preparing),
+                        // 文字一律反映實際狀態（不受本機 prepareMode 影響）：
+                        // W→处理中、O→待取餐、其餘(J)→新单
+                        text = stringResource(
+                            id = when (orderStatus) {
+                                PROGRESSING -> R.string.preparing
+                                PREPARED -> R.string.prepared
+                                else -> R.string.prepare
+                            }
+                        ),
                         color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
@@ -332,7 +342,7 @@ private fun MainFeatureBtn(
             }
         }
 
-        if (orderStatus == PROGRESSING && prefs.isPrepareEnable) {
+        if (orderStatus == PROGRESSING) {
             Text(
                 text = "click to finish",
                 color = Color.Black.copy(alpha = 0.8f),

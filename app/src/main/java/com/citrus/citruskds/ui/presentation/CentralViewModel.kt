@@ -14,6 +14,10 @@ import com.citrus.citruskds.commonData.Resource
 import com.citrus.citruskds.commonData.Result
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.OrderReadyInfo
+import com.citrus.citruskds.commonData.vo.addonItems
+import com.citrus.citruskds.commonData.vo.displayStatus
+import com.citrus.citruskds.commonData.vo.isAddon
+import com.citrus.citruskds.commonData.vo.isPending
 import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
 import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
@@ -71,10 +75,13 @@ class CentralViewModel @Inject constructor(
 
     private var updateJob: Job? = null
 
-    /** 自動接單已派發過的訂單（記憶體防重派；重啟 App 自動清空）*/
-    private val autoAcceptedThisSession = mutableSetOf<String>()
+    /** 自動接單基準：開啟（或重啟）當下已存在的「未接(有 pending j)」訂單，不自動接（避免一開就全接走）*/
+    private val autoAcceptBaseline = mutableSetOf<String>()
 
-    /** 自動接單是否已建立基準：開啟（或重啟）當下的舊 J 單設為基準不自動接，只套用之後進來的新單 */
+    /** 自動接單派發中的訂單（防止網路延遲窗口內重複派發；完成後移除）*/
+    private val autoAcceptInFlight = mutableSetOf<String>()
+
+    /** 自動接單是否已建立基準 */
     private var autoAcceptBaselined = false
 
     /** OrderReady 取餐牆：上一次輪詢的單號集合（用來算「新進來的」）*/
@@ -400,20 +407,12 @@ class CentralViewModel @Inject constructor(
             /**Main Finish按鍵觸發*/
             is CentralContract.Event.FinishOrder -> {
                 Timber.d("FinishOrder: ${event.order.orderNo}")
-//                if (currentState.printStatus != PrintStatus.Idle) {
-//                    return
-//                }
-                setOrderStatus(orderNo = event.order.orderNo, status = event.status)
-
-//                if (prefs.printMode == 1) {
-//                    setState {
-//                        copy(printOrder = event.order)
-//                    }
-//                }
+                setOrderStatus(orderNo = event.order.orderNo, status = event.status, fromStatus = event.fromStatus)
             }
 
             is CentralContract.Event.ProgressOrder -> {
-                setOrderStatus(orderNo = event.order.orderNo, status = event.status)
+                val isAddon = event.order.isAddon
+                setOrderStatus(orderNo = event.order.orderNo, status = event.status, fromStatus = event.fromStatus)
 
                 setState {
                     copy(mainList = currentState.mainList?.map {
@@ -425,19 +424,23 @@ class CentralViewModel @Inject constructor(
                     })
                 }
                 // 接單(變W)即印廚房單（Print Kitchen Order=Yes，printMode==0）
+                // 加點：只印新增品項並標「加點」；全新單：印整張
                 if (prefs.printMode == 0) {
-                    setState { copy(printOrder = event.order) }
+                    val toPrint = if (isAddon)
+                        event.order.copy(detail = event.order.addonItems, addonPrint = true)
+                    else event.order
+                    requestPrint(toPrint)
                 }
             }
 
             /**Served Collected按鍵觸發*/
             is CentralContract.Event.CollectedOrder -> {
-                setOrderStatus(orderNo = event.orderNo, status = event.status)
+                setOrderStatus(orderNo = event.orderNo, status = event.status, fromStatus = event.fromStatus)
             }
 
             /**Recall Recall按鍵觸發*/
             is CentralContract.Event.RecallOrder -> {
-                setOrderStatus(orderNo = event.orderNo, status = event.status)
+                setOrderStatus(orderNo = event.orderNo, status = event.status, fromStatus = event.fromStatus)
             }
 
             /**載入庫存列表*/
@@ -584,11 +587,15 @@ class CentralViewModel @Inject constructor(
 
 
                 if (prefs.printMode == 0) {
-                    setState {
-                        Timber.d("Printer issue trace: step 1")
-                        copy(printOrder = event.order)
-                    }
+                    requestPrint(event.order)
                 }
+            }
+
+            /**列印失敗後重印上一張快照（含加點子集；不受狀態已升級影響）*/
+            is CentralContract.Event.RetryPrintOrder -> {
+                val last = currentState.printOrder ?: return
+                setState { copy(printStatus = PrintStatus.Idle) }
+                requestPrint(last)
             }
         }
 
@@ -783,11 +790,17 @@ class CentralViewModel @Inject constructor(
         }
     }
 
-    private fun setOrderStatus(orderNo: String, status: String) = viewModelScope.launch {
+    /** 發出一次列印請求：更新快照並遞增 printRequestId，讓 MainActivity 即使重印同一張也會重觸發 */
+    private fun requestPrint(order: Order) {
+        setState { copy(printOrder = order, printRequestId = printRequestId + 1) }
+    }
+
+    private fun setOrderStatus(orderNo: String, status: String, fromStatus: String? = null) = viewModelScope.launch {
         repository.setOrderStatus(
             setOrderStatusRequest = SetOrderStatusRequest(
                 orderNo = orderNo,
-                status = status
+                status = status,
+                fromStatus = fromStatus
             )
         ).collect { result ->
             when (result) {
@@ -1031,28 +1044,35 @@ class CentralViewModel @Inject constructor(
     }
 
     /**
-     * 自動接單：開啟且 prepareMode 開時，把新進的 J(NEW) 單自動推進到 W(製作中)。
-     * 只套用「開啟之後才進來的新單」；開啟（或重啟）當下已存在的舊 J 單設為基準、不自動接。
+     * 自動接單：開啟且 prepareMode 開時，把「有未接 pending(j)」的單自動推進到 W(製作中)。
+     * - 候選 = displayStatus()=="J"（有 pending j；後端未提供 per-item itemStatus 時自動回退到整單 status==NEW，無回歸）。
+     * - 開啟（或重啟）當下已存在的未接單設為基準、不自動接；只套用之後進來的。
+     * - 加點(isAddon：已接 W/O 又冒出新 j)可越過基準/去重 → 支援「再加點」重複觸發。
+     * - InFlight 防止延遲窗口內重複派發；派發後 j→W，下次輪詢不再是候選（自然去重）。
      */
     private fun autoAcceptNewOrders(orders: List<Order>) {
         if (!prefs.isAutoAcceptEnable || !prefs.isPrepareEnable) {
             autoAcceptBaselined = false   // 關閉時重置，下次開啟重新建立基準
+            autoAcceptBaseline.clear()
             return
         }
 
-        val newOrders = orders.filter { it.status.uppercase() == NEW }
+        val pendingOrders = orders.filter { it.displayStatus() == NEW }
 
         if (!autoAcceptBaselined) {
-            // 開啟（或重啟）後第一次：現有 J 單設為基準，舊單不派，只套用之後進來的新單
-            newOrders.forEach { autoAcceptedThisSession.add(it.orderNo) }
+            // 開啟（或重啟）後第一次：現有未接單設為基準，不自動接
+            autoAcceptBaseline.clear()
+            pendingOrders.forEach { autoAcceptBaseline.add(it.orderNo) }
             autoAcceptBaselined = true
             return
         }
 
-        newOrders
-            .filter { it.orderNo !in autoAcceptedThisSession }
+        pendingOrders
+            .filter { it.orderNo !in autoAcceptInFlight }
+            // 非基準訂單；或雖在基準但已是加點(代表已被部分接過)→ 也要接
+            .filter { it.orderNo !in autoAcceptBaseline || it.isAddon }
             .forEach { order ->
-                autoAcceptedThisSession.add(order.orderNo)   // 先標記再派發，避免下次輪詢重派
+                autoAcceptInFlight.add(order.orderNo)
                 autoAcceptDispatch(order)
             }
     }
@@ -1063,35 +1083,49 @@ class CentralViewModel @Inject constructor(
      */
     private fun autoAcceptDispatch(order: Order) = viewModelScope.launch {
         val orderNo = order.orderNo
-        // 樂觀更新：先把畫面改成製作中（不等下一輪輪詢）
+        val isAddon = order.isAddon
+        // 樂觀更新：把該單的 pending(j) 品項就地改成 W（同時更新整單 status，兼容後端未提供 itemStatus 的情況）
         setState {
-            copy(mainList = currentState.mainList?.map {
-                if (it.orderNo == orderNo) it.copy(status = PROGRESSING) else it
+            copy(mainList = currentState.mainList?.map { o ->
+                if (o.orderNo == orderNo)
+                    o.copy(
+                        status = PROGRESSING,
+                        detail = o.detail.map { d -> if (d.isPending) d.copy(itemStatus = PROGRESSING) else d }
+                    )
+                else o
             })
         }
 
         repository.setOrderStatus(
             setOrderStatusRequest = SetOrderStatusRequest(
                 orderNo = orderNo,
-                status = PROGRESSING
+                status = PROGRESSING,
+                fromStatus = "j,J"   // 只升級未接的新品項
             )
         ).collect { result ->
             when (result) {
                 is Result.Success -> {
                     // 接單(變W)成功 → 印廚房單（Print Kitchen Order=Yes，printMode==0）
+                    // 加點只印新增品項並標「加點」；全新單印整張
                     if (prefs.printMode == 0) {
-                        setState { copy(printOrder = order) }
+                        val toPrint = if (isAddon)
+                            order.copy(detail = order.addonItems, addonPrint = true)
+                        else order
+                        requestPrint(toPrint)
                     }
+                    autoAcceptInFlight.remove(orderNo)
                 }
 
                 is Result.Error -> {
-                    Timber.d("autoAccept 派發失敗，還原 $orderNo 為 NEW: ${result.error}")
-                    // 失敗：改回 J(新單)
+                    Timber.d("autoAccept 派發失敗，還原 $orderNo: ${result.error}")
+                    // 失敗：還原整單 status（相容無 itemStatus 的舊路徑）；
+                    // 有 itemStatus 時 detail 交給下一輪輪詢校正（伺服器仍為 j），避免誤翻原本已 W 的品項
                     setState {
-                        copy(mainList = currentState.mainList?.map {
-                            if (it.orderNo == orderNo) it.copy(status = NEW) else it
+                        copy(mainList = currentState.mainList?.map { o ->
+                            if (o.orderNo == orderNo) o.copy(status = NEW) else o
                         })
                     }
+                    autoAcceptInFlight.remove(orderNo)
                     when (result.error) {
                         is NetworkError -> setState { copy(errMsg = result.error.asUiText()) }
                         else -> Unit

@@ -64,6 +64,8 @@ import timber.log.Timber
 fun ErrorDialog(
     errorMsg: UiText?,
     onDismissRequest: () -> Unit,
+    confirmText: String? = null,
+    onConfirm: (() -> Unit)? = null,
 ) {
 
 
@@ -121,6 +123,23 @@ fun ErrorDialog(
                         modifier = Modifier
                             .padding(10.dp)
                     )
+                }
+
+                // 選配確認鈕（如列印失敗的「重印」）
+                if (onConfirm != null) {
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(ColorBlue),
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(
+                            text = confirmText ?: "OK",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
                 }
 
             }

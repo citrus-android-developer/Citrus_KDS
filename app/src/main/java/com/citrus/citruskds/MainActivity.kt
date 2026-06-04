@@ -20,12 +20,17 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import android.content.res.Configuration
+import java.util.Locale
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -164,6 +169,7 @@ class MainActivity : ComponentActivity() {
     }
 
 
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
     @SuppressLint("WrongConstant")
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -184,9 +190,25 @@ class MainActivity : ComponentActivity() {
 
                 val updateAsk = remember { mutableStateOf(false) }
 
-//                LaunchedEffect(Unit) {
-//                    downloadApk("citrus_kds.apk", "citrus_kds.apk")
-//                }
+                // 語系單一來源：以 languageState 提供更新後的 LocalConfiguration/LocalContext，
+                // 讓整棵 Compose 樹（stringResource 與品項名稱）一致重組
+                //（取代 KdsScreen 的 updateConfiguration 與 SettingPage 的 alpha hack）
+                val baseConfiguration = LocalConfiguration.current
+                val baseContext = LocalContext.current
+                val langText = homeViewModel.currentState.languageState.state.text.toString()
+                val localizedConfiguration = remember(langText, baseConfiguration) {
+                    Configuration(baseConfiguration).apply {
+                        setLocale(if (langText == "English") Locale("en") else Locale("zh"))
+                    }
+                }
+                val localizedContext = remember(localizedConfiguration) {
+                    baseContext.createConfigurationContext(localizedConfiguration)
+                }
+
+                CompositionLocalProvider(
+                    LocalConfiguration provides localizedConfiguration,
+                    LocalContext provides localizedContext,
+                ) {
 
                 LaunchedEffect(homeViewModel.currentState.isVerifyCancel) {
                     if (homeViewModel.currentState.isVerifyCancel) {
@@ -194,9 +216,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                LaunchedEffect(homeViewModel.currentState.printOrder) {
-                    homeViewModel.currentState.printOrder?.let {
-                        printUtil.setOrderPrint(it)
+                // key 在 printRequestId：重印同一張(含加點)也會重觸發
+                LaunchedEffect(homeViewModel.currentState.printRequestId) {
+                    if (homeViewModel.currentState.printRequestId > 0) {
+                        homeViewModel.currentState.printOrder?.let {
+                            printUtil.setOrderPrint(it)
+                        }
                     }
                 }
 
@@ -284,6 +309,7 @@ class MainActivity : ComponentActivity() {
                         })
                 }
 
+                } // CompositionLocalProvider（語系）
             }
         }
 

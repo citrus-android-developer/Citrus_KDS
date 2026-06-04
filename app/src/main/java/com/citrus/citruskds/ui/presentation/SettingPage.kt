@@ -122,7 +122,6 @@ private fun ConnectParams(
     val isExpanded2 = remember { mutableStateOf(false) }
     val isExpanded3 = remember { mutableStateOf(false) }
 
-    val invalidScreen = remember { mutableFloatStateOf(1f) }
     var securityManager by remember { mutableStateOf(false) }
 
     var isPrinterSelectVisible by remember { mutableStateOf(prefs.printMode == 0) }
@@ -130,9 +129,7 @@ private fun ConnectParams(
     var isPrepareEnabled by remember { mutableStateOf(prefs.isPrepareEnable) }
     var isAutoAcceptEnabled by remember { mutableStateOf(prefs.isAutoAcceptEnable) }
 
-    LaunchedEffect(state.languageState) {
-        invalidScreen.floatValue = if (invalidScreen.floatValue == 1f) 0.99f else 1f
-    }
+    // 語系切換的強制重繪 hack 已移除：locale 改由 MainActivity 的 CompositionLocalProvider 統一套用
 
     LaunchedEffect(Unit) {
         if (prefs.firstInstall) {
@@ -142,7 +139,7 @@ private fun ConnectParams(
     }
 
 
-    Column(modifier = Modifier.alpha(invalidScreen.floatValue)) {
+    Column {
         Text(
             text = stringResource(id = R.string.connect_params),
             color = ColorBlue,
