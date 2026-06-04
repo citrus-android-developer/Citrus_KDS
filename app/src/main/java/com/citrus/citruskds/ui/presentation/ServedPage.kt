@@ -48,6 +48,7 @@ import com.citrus.citruskds.ui.presentation.widget.OrderItemWithOK
 import com.citrus.citruskds.ui.presentation.widget.ServedItem
 import com.citrus.citruskds.ui.presentation.widget.TextClock
 import com.citrus.citruskds.ui.theme.ColorBlue
+import com.citrus.citruskds.ui.theme.ColorDeepGreen
 import com.citrus.citruskds.util.TextInputField
 import com.citrus.citruskds.util.pressClickEffect
 
@@ -197,9 +198,9 @@ private fun ServedFeatureBtn(reprint: () -> Unit, collected: () -> Unit) {
 
         Button(
             onClick = { },
-            colors = ButtonDefaults.buttonColors(Color.DarkGray),
+            colors = ButtonDefaults.buttonColors(ColorDeepGreen),
             shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(4.dp, Color.DarkGray),
+            border = BorderStroke(4.dp, ColorDeepGreen),
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 10.dp)

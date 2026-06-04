@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -56,7 +59,7 @@ import timber.log.Timber
 @Composable
 fun SettingPage(
     viewModel: CentralViewModel,
-    navigateTo: () -> Unit,
+    navigateTo: (Int) -> Unit,
     onVerifyCancel: () -> Unit,
 ) {
     SettingContent(
@@ -71,7 +74,7 @@ fun SettingPage(
 fun SettingContent(
     state: CentralContract.State,
     event: (CentralContract.Event) -> Unit,
-    navigateTo: () -> Unit,
+    navigateTo: (Int) -> Unit,
     onVerifyCancel: () -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
@@ -105,7 +108,7 @@ fun SettingContent(
 private fun ConnectParams(
     state: CentralContract.State,
     event: (CentralContract.Event) -> Unit,
-    navigateTo: () -> Unit,
+    navigateTo: (Int) -> Unit,
     onVerifyCancel: () -> Unit,
 ) {
     val isExpanded1 = remember { mutableStateOf(false) }
@@ -116,6 +119,9 @@ private fun ConnectParams(
     var securityManager by remember { mutableStateOf(false) }
 
     var isPrinterSelectVisible by remember { mutableStateOf(prefs.printMode == 0) }
+
+    var isPrepareEnabled by remember { mutableStateOf(prefs.isPrepareEnable) }
+    var isAutoAcceptEnabled by remember { mutableStateOf(prefs.isAutoAcceptEnable) }
 
     LaunchedEffect(state.languageState) {
         invalidScreen.floatValue = if (invalidScreen.floatValue == 1f) 0.99f else 1f
@@ -176,6 +182,16 @@ private fun ConnectParams(
                     textFieldValue = state.localIpState,
                     placeholder = "POS IP",
                     keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Next,
+                    enabled = true,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(text = "Server URL", fontSize = 14.sp, color = ColorBlue)
+                TextInputField(
+                    textFieldValue = state.serverUrlState,
+                    placeholder = "https://global.citrus.tw/CompassKDS/",
+                    keyboardType = KeyboardType.Uri,
                     imeAction = ImeAction.Next,
                     enabled = true,
                     modifier = Modifier.padding(bottom = 20.dp)
@@ -280,8 +296,31 @@ private fun ConnectParams(
                     color = ColorBlue
                 )
                 PrepareRadio {
+                    isPrepareEnabled = it
+                    if (!it) isAutoAcceptEnabled = false   // 連動關閉自動接單
                     event(CentralContract.Event.onPrepareModeChanged(it))
                 }
+
+                Text(
+                    text = stringResource(id = R.string.auto_accept),
+                    fontSize = 14.sp,
+                    color = if (isPrepareEnabled) ColorBlue else ColorBlue.copy(alpha = 0.4f)
+                )
+                AutoAcceptRadio(
+                    enabled = isPrepareEnabled,
+                    checked = isAutoAcceptEnabled
+                ) {
+                    isAutoAcceptEnabled = it
+                    event(CentralContract.Event.onAutoAcceptModeChanged(it))
+                }
+                Text(
+                    text = stringResource(
+                        id = if (isPrepareEnabled) R.string.auto_accept_hint
+                        else R.string.auto_accept_disabled_hint
+                    ),
+                    fontSize = 12.sp,
+                    color = ColorBlue.copy(alpha = 0.4f)
+                )
 
                 Text(
                     text = stringResource(id = R.string.kitchen_order),
@@ -296,50 +335,85 @@ private fun ConnectParams(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 if (isPrinterSelectVisible) {
-                    Text(
-                        text = stringResource(id = R.string.printer),
-                        fontSize = 14.sp,
-                        color = ColorBlue
+                    Text(text = "Printer IP", fontSize = 14.sp, color = ColorBlue)
+                    TextInputField(
+                        textFieldValue = state.printerIpState,
+                        placeholder = "192.168.0.66",
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next,
+                        enabled = true,
+                        modifier = Modifier.padding(bottom = 10.dp)
                     )
-                    ExposedDropdownMenuBox(
-                        expanded = isExpanded2.value,
-                        onExpandedChange = { newValue ->
-                            isExpanded2.value = newValue
-                        }
-                    ) {
-                        TextInputField(
-                            textFieldValue = state.printerState,
-                            placeholder = stringResource(id = R.string.printer_params_tint),
-                            readOnly = true,
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = isExpanded2.value)
-                            },
-                            enabled = false,
-                            modifier = Modifier
-                                .padding(bottom = 20.dp)
-                                .menuAnchor()
-                        )
 
-                        ExposedDropdownMenu(
+                    Text(text = "Port", fontSize = 14.sp, color = ColorBlue)
+                    TextInputField(
+                        textFieldValue = state.printerPortState,
+                        placeholder = "9100",
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done,
+                        enabled = true,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                    ) {
+                        Button(
+                            onClick = { event(CentralContract.Event.TestPrinter) },
+                            colors = ButtonDefaults.buttonColors(ColorBlue),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(text = "測試連線", color = Color.White, fontSize = 14.sp)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Button(
+                            onClick = { event(CentralContract.Event.ScanPrinters) },
+                            colors = ButtonDefaults.buttonColors(ColorBlue),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(text = "掃描", color = Color.White, fontSize = 14.sp)
+                        }
+                    }
+
+                    if (!state.printerInfo.isNullOrEmpty()) {
+                        ExposedDropdownMenuBox(
                             expanded = isExpanded2.value,
-                            onDismissRequest = {
-                                isExpanded2.value = false
+                            onExpandedChange = { newValue ->
+                                isExpanded2.value = newValue
                             }
                         ) {
-                            state.printerInfo?.forEach { info ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = (info["PrinterName"]
-                                                ?: "") + " " + (info["Target"]
-                                                ?: "")
-                                        )
-                                    },
-                                    onClick = {
-                                        event(CentralContract.Event.OnPrinterSelected(info))
-                                        isExpanded2.value = false
-                                    }
-                                )
+                            TextInputField(
+                                textFieldValue = state.printerState,
+                                placeholder = "選擇掃描到的印表機",
+                                readOnly = true,
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = isExpanded2.value)
+                                },
+                                enabled = false,
+                                modifier = Modifier
+                                    .padding(bottom = 20.dp)
+                                    .menuAnchor()
+                            )
+
+                            ExposedDropdownMenu(
+                                expanded = isExpanded2.value,
+                                onDismissRequest = {
+                                    isExpanded2.value = false
+                                }
+                            ) {
+                                state.printerInfo?.forEach { info ->
+                                    DropdownMenuItem(
+                                        text = { Text(text = info["Target"] ?: "") },
+                                        onClick = {
+                                            event(CentralContract.Event.OnPrinterSelected(info))
+                                            isExpanded2.value = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -352,8 +426,24 @@ private fun ConnectParams(
                     color = ColorBlue
                 )
                 ModeRadio {
-                    navigateTo()
+                    // 先更新模式，再直接導到對應頁（避免經由 KDS 頁 modeState 競態而彈回）
                     event(CentralContract.Event.OnModeChanged(it))
+                    navigateTo(it)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = stringResource(id = R.string.order_ready_orientation),
+                    fontSize = 14.sp,
+                    color = ColorBlue
+                )
+                OrientationRadio {
+                    event(CentralContract.Event.onOrderReadyOrientationChanged(it))
+                    // 已在 OrderReady 模式 → 直接導回取餐牆即時套用新方向；KDS 模式只存設定不跳
+                    if (prefs.mode == 1) {
+                        navigateTo(1)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -419,6 +509,39 @@ private fun ConnectParams(
     }
 }
 
+
+@Composable
+fun AutoAcceptRadio(
+    enabled: Boolean,
+    checked: Boolean,
+    modeChanged: (Boolean) -> Unit = {}
+) {
+    val radioOptions = listOf("Yes", "No")
+    val selectedOption = if (checked) radioOptions[0] else radioOptions[1]
+    Row(modifier = Modifier.fillMaxWidth()) {
+        radioOptions.forEach { text ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+                modifier = Modifier.selectable(
+                    selected = (text == selectedOption),
+                    enabled = enabled,
+                    onClick = { modeChanged(text == "Yes") }
+                )
+            ) {
+                RadioButton(
+                    selected = (text == selectedOption),
+                    enabled = enabled,
+                    onClick = { modeChanged(text == "Yes") }
+                )
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium.merge(),
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun PrepareRadio(modeChanged: (Boolean) -> Unit = {}) {
@@ -560,6 +683,43 @@ fun ModeRadio(modeChanged: (Int) -> Unit = {}) {
                                 1
                             }
                         modeChanged(mode)
+                    }
+                )
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium.merge(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun OrientationRadio(modeChanged: (Int) -> Unit = {}) {
+    // 0=Landscape 1=Portrait
+    val radioOptions = listOf("Landscape", "Portrait")
+    val (selectedOption, onOptionSelected) = remember(prefs.orderReadyOrientation) {
+        mutableStateOf(radioOptions[prefs.orderReadyOrientation])
+    }
+    Row(modifier = Modifier.fillMaxWidth()) {
+        radioOptions.forEach { text ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+                modifier = Modifier
+                    .selectable(
+                        selected = (text == selectedOption),
+                        onClick = {
+                            onOptionSelected(text)
+                            modeChanged(if (text == "Landscape") 0 else 1)
+                        }
+                    )
+            ) {
+                RadioButton(
+                    selected = (text == selectedOption),
+                    onClick = {
+                        onOptionSelected(text)
+                        modeChanged(if (text == "Landscape") 0 else 1)
                     }
                 )
                 Text(

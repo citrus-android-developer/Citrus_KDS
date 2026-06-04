@@ -46,6 +46,7 @@
     <string name="print_time">Print time:</string>
     <string name="no">No.</string>
     <string name="system_mode">System Mode</string>
+    <string name="order_ready_orientation">Order Ready Orientation</string>
     <string name="category">Category </string>
     <string name="reprint">Reprint</string>
     <string name="verify">Verify</string>
@@ -57,6 +58,10 @@
     <string name="download_hint">Version Number</string>
     <string name="kitchen_order">Print Kitchen Order</string>
     <string name="is_prepare_status_enable">Is Prepare Status Enable</string>
+    <string name="auto_accept">Auto Accept</string>
+    <string name="auto_accept_hint">New orders auto-marked as preparing</string>
+    <string name="auto_accept_disabled_hint">Enable Prepare Mode first</string>
+    <string name="order_not_in_served">This order is not in the ready-to-collect list</string>
     <string name="item_abnormal">The item is abnormal, please check the background settings.</string>
 
 

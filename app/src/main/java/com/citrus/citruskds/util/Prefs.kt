@@ -23,9 +23,19 @@ class Prefs(context: Context) {
         get() = prefs.getInt("printMode", 0)
         set(value) = prefs.edit().putInt("printMode", value).apply()
 
+    // 取餐牆方向：0=橫向(Landscape) 1=直向(Portrait)
+    var orderReadyOrientation: Int
+        get() = prefs.getInt("orderReadyOrientation", 0)
+        set(value) = prefs.edit().putInt("orderReadyOrientation", value).apply()
+
     var isPrepareEnable: Boolean
         get() = prefs.getBoolean("isPrepareEnable", false)
         set(value) = prefs.edit().putBoolean("isPrepareEnable", value).apply()
+
+    /** 自動接單：新單自動 J→W（僅 isPrepareEnable 開啟時生效，預設關）*/
+    var isAutoAcceptEnable: Boolean
+        get() = prefs.getBoolean(Constants.KEY_AUTO_ACCEPT, false)
+        set(value) = prefs.edit().putBoolean(Constants.KEY_AUTO_ACCEPT, value).apply()
 
     var language: String
         get() = prefs.getString("language", "English") ?: "English"
@@ -89,9 +99,21 @@ class Prefs(context: Context) {
         get() = prefs.getString(Constants.KEY_SEVER_IP, "") ?: ""
         set(value) = prefs.edit().putString(Constants.KEY_SEVER_IP, value).apply()
 
+    /** POS IP（可在設定頁修改；未填時回退到 DEFAULT_POS_IP）*/
     var localIp: String
-        get() = prefs.getString("localIp", "") ?: ""
+        get() = (prefs.getString("localIp", Constants.DEFAULT_POS_IP)
+            ?: Constants.DEFAULT_POS_IP).ifBlank { Constants.DEFAULT_POS_IP }
         set(value) = prefs.edit().putString("localIp", value).apply()
+
+    /** Server 端 base url（可在設定頁修改；未填時回退到 DEFAULT_SERVER_URL）*/
+    var serverUrl: String
+        get() = (prefs.getString("serverUrl", Constants.DEFAULT_SERVER_URL)
+            ?: Constants.DEFAULT_SERVER_URL).ifBlank { Constants.DEFAULT_SERVER_URL }
+        set(value) = prefs.edit().putString("serverUrl", value).apply()
+
+    /** serverUrl 正規化：自動補結尾斜線 */
+    val serverBaseUrl: String
+        get() = serverUrl.let { if (it.isBlank() || it.endsWith("/")) it else "$it/" }
 
     var printerTarget: String
         get() = prefs.getString("printerTarget", "") ?: ""
@@ -100,6 +122,16 @@ class Prefs(context: Context) {
     var printerName: String
         get() = prefs.getString("printerName", "") ?: ""
         set(value) = prefs.edit().putString("printerName", value).apply()
+
+    /** LAN 印表機 IP（設定頁設定，取代原 USB 探索的 printerTarget）*/
+    var printerIp: String
+        get() = prefs.getString("printerIp", "") ?: ""
+        set(value) = prefs.edit().putString("printerIp", value).apply()
+
+    /** LAN 印表機 Port（RAW socket，預設 9100）*/
+    var printerPort: Int
+        get() = prefs.getInt("printerPort", 9100)
+        set(value) = prefs.edit().putInt("printerPort", value).apply()
 
     var portName: String
         get() = prefs.getString(Constants.KEY_PORT_NAME, "") ?: ""

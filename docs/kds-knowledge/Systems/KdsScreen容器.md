@@ -2,7 +2,7 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-06-04
 tags:
   - type/system
   - status/done
@@ -74,3 +74,11 @@ if (!prefs.firstInstall && prefs.localIp.isNotBlank()
 - 模式切換：[[系統模式切換]]
 - 輪詢機制：[[輪詢架構]]
 - 版本更新入口：[[版本更新系統]]
+
+
+
+## 2026-06-04 修正：切 tab 殘影
+- **症狀**：主頁↔已完成切換有殘影/閃爍。
+- **根因**：`HorizontalPager { page -> ReadyForPage(selectedTabIndex, ...) }` —— 每頁都用**全域 selectedTabIndex** 渲染（非自己的 page），切 tab 動畫過半 currentPage 一變、兩個分頁位置同時抽換內容 → 殘影。
+- **修法**：改成 `ReadyForPage(page, ...)`、`ReadyForPage(page:Int)` 用 `when(page)`，每頁畫自己的內容；tab onClick 維持 animateScrollToPage。
+- 驗證：build 綠燈、已上機。

@@ -12,6 +12,8 @@ import com.citrus.citruskds.commonData.DataError
 import com.citrus.citruskds.commonData.NetworkError
 import com.citrus.citruskds.commonData.Resource
 import com.citrus.citruskds.commonData.Result
+import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.commonData.vo.OrderReadyInfo
 import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
 import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
@@ -23,11 +25,14 @@ import com.citrus.citruskds.ui.presentation.usecase.DownloadStatus
 import com.citrus.citruskds.ui.presentation.usecase.KtorDownloadUseCase
 import com.citrus.citruskds.util.BaseViewModel
 import com.citrus.citruskds.util.Constants.COLLECTED
+import com.citrus.citruskds.util.Constants.NEW
 import com.citrus.citruskds.util.Constants.PREPARED
 import com.citrus.citruskds.util.Constants.PROGRESSING
 import com.citrus.citruskds.util.InputStateWrapper
 import com.citrus.citruskds.util.PrintStatus
 import com.citrus.citruskds.util.PrinterDetecter
+import com.citrus.citruskds.util.lanprint.LanPrinter
+import com.citrus.citruskds.util.lanprint.NetworkScanner
 import com.citrus.citruskds.util.UiText
 import com.citrus.citruskds.util.asUiText
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -65,6 +70,21 @@ class CentralViewModel @Inject constructor(
     private var animateBufferGap = false
 
     private var updateJob: Job? = null
+
+    /** 自動接單已派發過的訂單（記憶體防重派；重啟 App 自動清空）*/
+    private val autoAcceptedThisSession = mutableSetOf<String>()
+
+    /** 自動接單是否已建立基準：開啟（或重啟）當下的舊 J 單設為基準不自動接，只套用之後進來的新單 */
+    private var autoAcceptBaselined = false
+
+    /** OrderReady 取餐牆：上一次輪詢的單號集合（用來算「新進來的」）*/
+    private var orderReadyPrevSet = emptySet<String>()
+    private var orderReadyInitialized = false
+    /** OrderReady 要標紅的單號集合：最新一批進來的新單，直到下一批新單進來才換 */
+    private var orderReadyRedSet = emptySet<String>()
+
+    /** 店家圖片刷新 token：只在按下 reload 按鈕時 +1（平常不變→走快取不閃）*/
+    private var imgReloadTick = 0
 
 
     init {
@@ -185,6 +205,24 @@ class CentralViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            currentState.serverUrlState.state.textAsFlow().collectLatest {
+                prefs.serverUrl = it.toString()
+            }
+        }
+
+        viewModelScope.launch {
+            currentState.printerIpState.state.textAsFlow().collectLatest {
+                prefs.printerIp = it.toString()
+            }
+        }
+
+        viewModelScope.launch {
+            currentState.printerPortState.state.textAsFlow().collectLatest {
+                prefs.printerPort = it.toString().toIntOrNull() ?: 9100
+            }
+        }
+
+        viewModelScope.launch {
             currentState.servedSearchState.state.textAsFlow()
                 .combine(snapshotFlow { currentState.servedList }) { searchStr, servedList ->
                     searchStr to servedList
@@ -229,6 +267,7 @@ class CentralViewModel @Inject constructor(
             kdsIdState = InputStateWrapper(TextFieldState(prefs.kdsId)),
             rsnoState = InputStateWrapper(TextFieldState(prefs.rsno)),
             localIpState = InputStateWrapper(TextFieldState(prefs.localIp)),
+            serverUrlState = InputStateWrapper(TextFieldState(prefs.serverUrl)),
             languageState = InputStateWrapper(TextFieldState(prefs.language)),
             itemDisplayLanState = InputStateWrapper(TextFieldState(prefs.itemDisplayLan)),
             defaultPageState = InputStateWrapper(TextFieldState(getDefaultPageByLan())),
@@ -237,17 +276,32 @@ class CentralViewModel @Inject constructor(
             stockTypeSelect = InputStateWrapper(TextFieldState("")),
             stockSearchState = InputStateWrapper(TextFieldState("")),
             printerState = InputStateWrapper(TextFieldState(printer)),
+            printerIpState = InputStateWrapper(TextFieldState(prefs.printerIp)),
+            printerPortState = InputStateWrapper(TextFieldState(prefs.printerPort.toString())),
         )
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     override fun handleEvent(event: CentralContract.Event) {
         when (event) {
             is CentralContract.Event.onPrepareModeChanged -> {
                 prefs.isPrepareEnable = event.mode
+                // PrepareMode 關閉時強制連動關掉自動接單（避免 J 瞬間→O 進 Served）
+                if (!event.mode) {
+                    prefs.isAutoAcceptEnable = false
+                }
+            }
+
+            is CentralContract.Event.onAutoAcceptModeChanged -> {
+                prefs.isAutoAcceptEnable = event.mode
             }
 
             is CentralContract.Event.onPrintModeChanged -> {
                 prefs.printMode = event.mode
+            }
+
+            is CentralContract.Event.onOrderReadyOrientationChanged -> {
+                prefs.orderReadyOrientation = event.mode
             }
 
             is CentralContract.Event.onDismissErrorDialog -> {
@@ -432,20 +486,88 @@ class CentralViewModel @Inject constructor(
                 //setInventory(event.stock)
             }
 
-            /**選擇印表機*/
+            /**選擇掃描到的印表機 → 填入 IP*/
             is CentralContract.Event.OnPrinterSelected -> {
-                setState {
-                    copy(
-                        printerState = InputStateWrapper(
-                            state = TextFieldState(
-                                (event.info["PrinterName"] ?: "") + " " + (event.info["Target"]
-                                    ?: "")
+                val ip = event.info["Target"] ?: ""
+                prefs.printerIp = ip
+                currentState.printerIpState.state.setTextAndPlaceCursorAtEnd(ip)
+            }
+
+            /**測試印表機連線*/
+            is CentralContract.Event.TestPrinter -> {
+                viewModelScope.launch {
+                    val ip = prefs.printerIp
+                    if (ip.isBlank()) {
+                        setState { copy(errMsg = UiText.DynamicString("請先輸入印表機 IP")) }
+                        return@launch
+                    }
+                    val ok = LanPrinter(ip = ip, port = prefs.printerPort).ping()
+                    setState {
+                        copy(
+                            errMsg = UiText.DynamicString(
+                                if (ok) "印表機連線成功 ✓ ($ip:${prefs.printerPort})"
+                                else "印表機連線失敗 ✗ ($ip:${prefs.printerPort})"
                             )
                         )
-                    )
+                    }
                 }
-                prefs.printerTarget = event.info["Target"] ?: ""
-                prefs.printerName = event.info["PrinterName"] ?: ""
+            }
+
+            /**掃描區網印表機*/
+            is CentralContract.Event.ScanPrinters -> {
+                viewModelScope.launch {
+                    val base = prefs.printerIp.ifBlank { prefs.localIp }.substringBefore(":")
+                    val subnet = base.split(".").take(3).joinToString(".").ifBlank { "192.168.0" }
+                    val found = NetworkScanner.scan(subnet)
+                    val list = ArrayList(found.map {
+                        mapOf("PrinterName" to "Printer", "Target" to it)
+                    })
+                    printerDetecter.setValue(list)
+                }
+            }
+
+            /**手動刷新取餐牆店家圖片*/
+            is CentralContract.Event.ReloadOrderReadyImages -> {
+                imgReloadTick++
+                val tickSnapshot = imgReloadTick
+                setState { copy(orderReadyTick = tickSnapshot) }
+            }
+
+            /**掃描取餐 QR（=訂單號）→ 即時抓 served 清單比對 → 自動 Collect*/
+            is CentralContract.Event.ScanOrderNo -> {
+                val orderNo = event.orderNo.trim()
+                if (orderNo.isNotEmpty()) {
+                    viewModelScope.launch {
+                        // 掃碼取餐：要收的是「待取(O)」的單。後端 served 回的是已取(F)，
+                        // 故改查 main（含 J/W/O），且僅在該單為 PREPARED(O) 時才 Collect。
+                        repository.getOrders(type = "main").collect { result ->
+                            when (result) {
+                                is Result.Success -> {
+                                    val match = result.data.firstOrNull { it.orderNo == orderNo }
+                                    if (match != null && match.status.equals(PREPARED, ignoreCase = true)) {
+                                        setOrderStatus(orderNo, COLLECTED)
+                                    } else {
+                                        setState {
+                                            copy(errMsg = UiText.StringResource(R.string.order_not_in_served))
+                                        }
+                                    }
+                                }
+
+                                is Result.Error -> {
+                                    when (result.error) {
+                                        is NetworkError -> setState {
+                                            copy(errMsg = result.error.asUiText())
+                                        }
+
+                                        else -> Unit
+                                    }
+                                }
+
+                                else -> Unit
+                            }
+                        }
+                    }
+                }
             }
 
             /**重印廚房單*/
@@ -673,9 +795,10 @@ class CentralViewModel @Inject constructor(
                     Timber.d("setOrderStatus: ${result.data}")
                     if (status == PREPARED || status == COLLECTED) {
 
-                        if (status == PREPARED && orderNo.startsWith("E")) {
-                            setOrdersNotify(orderNo)
-                        }
+                        // 目前不需要呼叫 server 推播通知，暫時註解
+                        // if (status == PREPARED && orderNo.startsWith("E")) {
+                        //     setOrdersNotify(orderNo)
+                        // }
 
                         setState {
                             copy(mainList = currentState.mainList?.map {
@@ -800,8 +923,27 @@ class CentralViewModel @Inject constructor(
 
                 is Result.Success -> {
                     Timber.d("fetchOrderReady: ${result.data}")
+                    val currentNos = result.data.flatMap { it.orderNo }.toSet()
+                    if (orderReadyInitialized) {
+                        // 這次才出現的新單 → 成為新的紅色集合（取代上一批）
+                        val newNos = currentNos - orderReadyPrevSet
+                        if (newNos.isNotEmpty()) {
+                            orderReadyRedSet = newNos
+                        }
+                    }
+                    // 已被取餐/離開牆上的，從紅色集合移除
+                    orderReadyRedSet = orderReadyRedSet.intersect(currentNos)
+                    orderReadyPrevSet = currentNos
+                    orderReadyInitialized = true
+                    val redSnapshot = orderReadyRedSet   // 避免 setState lambda 內被 State 同名屬性遮蔽
+                    val tickSnapshot = imgReloadTick
                     setState {
-                        copy(orderReadyList = result.data, errMsg = null)
+                        copy(
+                            orderReadyList = result.data,
+                            orderReadyRedSet = redSnapshot,
+                            orderReadyTick = tickSnapshot,
+                            errMsg = null
+                        )
                     }
                 }
 
@@ -834,6 +976,7 @@ class CentralViewModel @Inject constructor(
                             setState {
                                 copy(mainList = result.data, errMsg = null)
                             }
+                            autoAcceptNewOrders(result.data)
                         }
 
                         "served" -> {
@@ -860,6 +1003,67 @@ class CentralViewModel @Inject constructor(
 
                         else -> Unit
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * 自動接單：開啟且 prepareMode 開時，把新進的 J(NEW) 單自動推進到 W(製作中)。
+     * 只套用「開啟之後才進來的新單」；開啟（或重啟）當下已存在的舊 J 單設為基準、不自動接。
+     */
+    private fun autoAcceptNewOrders(orders: List<Order>) {
+        if (!prefs.isAutoAcceptEnable || !prefs.isPrepareEnable) {
+            autoAcceptBaselined = false   // 關閉時重置，下次開啟重新建立基準
+            return
+        }
+
+        val newOrders = orders.filter { it.status.uppercase() == NEW }
+
+        if (!autoAcceptBaselined) {
+            // 開啟（或重啟）後第一次：現有 J 單設為基準，舊單不派，只套用之後進來的新單
+            newOrders.forEach { autoAcceptedThisSession.add(it.orderNo) }
+            autoAcceptBaselined = true
+            return
+        }
+
+        newOrders
+            .filter { it.orderNo !in autoAcceptedThisSession }
+            .forEach { order ->
+                autoAcceptedThisSession.add(order.orderNo)   // 先標記再派發，避免下次輪詢重派
+                autoAcceptDispatch(order.orderNo)
+            }
+    }
+
+    /**
+     * 自動接單派發：樂觀更新 —— 立即把該單畫面狀態改成 W(製作中)，不等下一輪輪詢；
+     * 若 setOrderStatus 失敗，再改回 J(新單) 並提示（不自動重試）。
+     */
+    private fun autoAcceptDispatch(orderNo: String) = viewModelScope.launch {
+        // 樂觀更新：先把畫面改成製作中（不等下一輪輪詢）
+        setState {
+            copy(mainList = currentState.mainList?.map {
+                if (it.orderNo == orderNo) it.copy(status = PROGRESSING) else it
+            })
+        }
+
+        repository.setOrderStatus(
+            setOrderStatusRequest = SetOrderStatusRequest(
+                orderNo = orderNo,
+                status = PROGRESSING
+            )
+        ).collect { result ->
+            if (result is Result.Error) {
+                Timber.d("autoAccept 派發失敗，還原 $orderNo 為 NEW: ${result.error}")
+                // 失敗：改回 J(新單)
+                setState {
+                    copy(mainList = currentState.mainList?.map {
+                        if (it.orderNo == orderNo) it.copy(status = NEW) else it
+                    })
+                }
+                when (result.error) {
+                    is NetworkError -> setState { copy(errMsg = result.error.asUiText()) }
+                    else -> Unit
                 }
             }
         }

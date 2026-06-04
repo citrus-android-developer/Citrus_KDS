@@ -28,6 +28,10 @@ class CentralContract {
         data class OnStockItemClicked(val stockInfo: StockInfo) : Event()
         data class OnSetInventory(val stock: StockInfo) : Event()
         data class OnPrinterSelected(val info: Map<String, String>) : Event()
+        data object TestPrinter : Event()
+        data object ScanPrinters : Event()
+        data class ScanOrderNo(val orderNo: String) : Event()
+        data object ReloadOrderReadyImages : Event()
         data class ReprintOrder(val order: Order) : Event()
         data object LoadStockList : Event()
         data class OnModeChanged(val mode: Int) : Event()
@@ -38,6 +42,8 @@ class CentralContract {
         data object onDismissErrorDialog : Event()
         data class onPrintModeChanged(val mode: Int) : Event()
         data class onPrepareModeChanged(val mode: Boolean) : Event()
+        data class onAutoAcceptModeChanged(val mode: Boolean) : Event()
+        data class onOrderReadyOrientationChanged(val mode: Int) : Event()
     }
 
     data class State(
@@ -46,15 +52,20 @@ class CentralContract {
         var kdsIdState: InputStateWrapper,
         var rsnoState: InputStateWrapper,
         var localIpState: InputStateWrapper,
+        var serverUrlState: InputStateWrapper,
         var languageState: InputStateWrapper,
         var itemDisplayLanState: InputStateWrapper,
         var defaultPageState: InputStateWrapper,
         var servedSearchState: InputStateWrapper,
         var recallSearchState: InputStateWrapper,
         var printerState: InputStateWrapper,
+        var printerIpState: InputStateWrapper,
+        var printerPortState: InputStateWrapper,
         var displayLan: String = prefs.itemDisplayLan,
         var currentPage: String = prefs.defaultPage.lowercase(),
         var orderReadyList: List<OrderReadyInfo>? = null,
+        var orderReadyRedSet: Set<String> = emptySet(),
+        var orderReadyTick: Int = 0,
         var mainList: List<Order>? = null,
         var servedList: List<Order>? = null,
         var recallList: List<Order>? = null,

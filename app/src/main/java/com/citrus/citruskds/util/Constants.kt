@@ -34,6 +34,12 @@ object Constants {
     //const val BASE_URL = "https://global.citrus.tw/CompassKDS/"
     const val BASE_URL = "https://global.citrus.tw/CompassKDS_UAT/"
 
+    /** Server URL 預設值（設定頁未填時的回退值）*/
+    const val DEFAULT_SERVER_URL = "http://192.168.0.162:8099/"
+
+    /** POS IP 預設值（設定頁未填時的回退值；格式 host:port）*/
+    const val DEFAULT_POS_IP = "192.168.0.162:8099"
+
 
     var df = DecimalFormat("#,###,##0.###")
     var dfShow = DecimalFormat("###,###,###,##0.##")
@@ -61,6 +67,7 @@ object Constants {
     const val KEY_ORDER_STRING = "KEY_ORDER_STRING"
     const val KEY_PORT_NAME = "KEY_PORT_NAME"
     const val KEY_BG_COLOR = "KEY_BG_COLOR"
+    const val KEY_AUTO_ACCEPT = "KEY_AUTO_ACCEPT"
 
     const val DOWNLOAD_URL = "http://hq.citrus.tw/apk/"
 

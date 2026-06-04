@@ -13,7 +13,6 @@ import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
 import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.di.prefs
-import com.citrus.citruskds.util.Constants
 import com.citrus.citruskds.util.Constants.POS_GET_ORDER
 import com.citrus.citruskds.util.Constants.POS_GET_ORDER_READY_INFO
 import com.citrus.citruskds.util.Constants.POS_GET_STOCK_INFO
@@ -80,7 +79,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
     override suspend fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {
             apiService.setSellStatusRemote(
-                url = Constants.BASE_URL + SERVER_SET_SELL_STATUS,
+                url = prefs.serverBaseUrl + SERVER_SET_SELL_STATUS,
                 setItemSellStatusRequest = setItemSellStatusRequest
             )
         }, feature = "SetSellStatusRemote: ") as Flow<Result<Unit, RootError>>
@@ -88,7 +87,7 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
     override suspend fun setOrdersNotifyRemote(ordersNotifyRequest: OrdersNotifyRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {
             apiService.setOrdersNotify(
-                url = Constants.BASE_URL + SERVER_SET_ORDERS_NOTIFY,
+                url = prefs.serverBaseUrl + SERVER_SET_ORDERS_NOTIFY,
                 ordersNotifyRequest = ordersNotifyRequest
             )
         }, feature = "SetOrdersNotify: ") as Flow<Result<Unit, RootError>>

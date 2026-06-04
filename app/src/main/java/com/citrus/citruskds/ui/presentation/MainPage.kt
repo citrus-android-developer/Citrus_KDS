@@ -355,6 +355,7 @@ fun GridItemPreview() {
             kdsIdState = InputStateWrapper(TextFieldState(prefs.kdsId)),
             rsnoState = InputStateWrapper(TextFieldState(prefs.rsno)),
             localIpState = InputStateWrapper(TextFieldState(prefs.localIp)),
+            serverUrlState = InputStateWrapper(TextFieldState(prefs.serverUrl)),
             languageState = InputStateWrapper(TextFieldState(prefs.language)),
             itemDisplayLanState = InputStateWrapper(TextFieldState(prefs.itemDisplayLan)),
             defaultPageState = InputStateWrapper(TextFieldState("0")),
@@ -363,6 +364,8 @@ fun GridItemPreview() {
             stockTypeSelect = InputStateWrapper(TextFieldState("")),
             stockSearchState = InputStateWrapper(TextFieldState("")),
             printerState = InputStateWrapper(TextFieldState("s")),
+            printerIpState = InputStateWrapper(TextFieldState("")),
+            printerPortState = InputStateWrapper(TextFieldState("9100")),
         ),
         event = {}
     )

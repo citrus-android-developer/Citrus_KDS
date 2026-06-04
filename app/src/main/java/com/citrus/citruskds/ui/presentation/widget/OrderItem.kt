@@ -26,11 +26,16 @@ import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Detail
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.CentralContract
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorPinkBg
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
 import com.citrus.citruskds.ui.theme.ColorYellowBg
+
+/** 品項顯示名稱：依系統語系挑（與 ServedItem / AllItemDialog 一致）*/
+private fun Detail.displayName(): String =
+    if (prefs.language == "English") eName else cName
 
 @Composable
 fun OrderItem(
@@ -120,7 +125,7 @@ fun OrderItem(
                 val add = if (data.addition.isNullOrBlank()) "" else "\n#${data.addition}"
 
                 OneLineItemInfo(
-                    data.eName,
+                    data.displayName(),
                     data.qty.toString(),
                     flavor,
                     add,
@@ -166,7 +171,7 @@ fun OneLineItemInfo(
             //回圈方式產生text呈現ename
             for (element in middleList) {
                 Text(
-                    text = " " + element.eName,
+                    text = " " + element.displayName(),
                     color = ColorBlue,
                     modifier = Modifier
                         .padding(start = 20.dp, top = 10.dp)

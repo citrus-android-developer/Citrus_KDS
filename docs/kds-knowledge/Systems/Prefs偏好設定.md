@@ -2,14 +2,14 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-06-03
 tags:
   - type/system
   - status/done
 summary: |-
-  KEY:SharedPreferences包裝,全域單例prefs,~30欄位｜連線(localIp/kdsId/rsno)/模式(mode/printMode)/印表機/計算(decimalPlace/methodOfOperation)
-  FLAG:Key命名不一致(部分KEY_*常數,部分硬編字串),無migration機制
-  DEP:[[設定頁]][[系統模式切換]][[POS-API端點]][[訂單狀態流轉]]
+  KEY:SharedPreferences包裝,全域單例prefs,~30欄位｜連線(localIp/serverUrl/kdsId/rsno)/模式(mode/printMode/prepareMode/autoAccept)/印表機/計算｜localIp+serverUrl空白回退DEFAULT常數
+  FLAG:Key命名不一致(部分KEY_*常數,部分硬編字串),無migration機制,測試用預設URL待移除
+  DEP:[[設定頁]][[系統模式切換]][[POS-API端點]][[訂單狀態流轉]][[自動接單功能]][[ISSUE-測試用預設URL待移除]]
 ---
 # Prefs 偏好設定
 
@@ -91,3 +91,17 @@ val mode = prefs.mode
 
 - 寫入處：[[設定頁]]（大部分欄位）、`MainActivity`（少數）
 - 讀取處：[[POS-API端點]]（拼接 URL）、[[訂單狀態流轉]]（kdsId）、[[系統模式切換]]（mode）
+
+
+## 2026-06-03 更新（新增欄位）
+
+| 欄位 | 型別 | 預設 | 用途 |
+|------|------|------|------|
+| `serverUrl` | String | `DEFAULT_SERVER_URL` | 遠端 Compass base url（設定頁可改）；getter 空白時回退到 `Constants.DEFAULT_SERVER_URL` |
+| `serverBaseUrl` | String(唯讀) | — | `serverUrl` 正規化：自動補結尾 `/`，供 [[POS-API端點]] 拼接 |
+| `isAutoAcceptEnable` | Boolean | false | 自動接單開關（用 `KEY_AUTO_ACCEPT`），見 [[自動接單功能]] |
+
+變更：
+- `localIp` getter 改為**空白時回退** `Constants.DEFAULT_POS_IP`（原預設 ""）
+- 測試階段 `DEFAULT_POS_IP` / `DEFAULT_SERVER_URL` = `192.168.0.162:8099`（待移除 → [[ISSUE-測試用預設URL待移除]]）
+- ⚠️ 已存非空白舊值的機器，回退不生效，需手動覆蓋

@@ -2,7 +2,7 @@
 type: project
 status: doing
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-06-03
 tags:
   - status/doing
   - type/project
@@ -68,3 +68,13 @@ App 啟動時依 `prefs.mode` 決定預設畫面（[[系統模式切換]]）：
 
 - [[ISSUE-Collect動畫缺失]] — Served 頁 Collect 沒有 OK 動畫覆蓋層
 - [[ISSUE-Collect死碼]] — Collect 成功處理路徑中對 mainList/recallList 的更新邏輯實質為死碼
+
+
+## 近期進度（2026-06-03）
+
+本次工作階段完成：
+
+1. **震動機號碼顯示** — `Order.note`（後端 Compass_KDS Orders 表 `Note`），[[訂單卡片元件]] 訂單號旁以括號顯示。後端 DAL/Model 已同步補上。見 [[資料模型]]
+2. **Server URL 可在設定頁修改** — 遠端 Compass base url 從 `Constants.BASE_URL` 改為 `prefs.serverBaseUrl`，[[設定頁]] 新增 Server URL 欄位。見 [[POS-API端點]] / [[Prefs偏好設定]]
+3. **自動接單功能** — [[自動接單功能]] 已實作（輪詢撈到 J 單自動派 W，需 autoAccept+prepareMode 皆開），待實機驗證
+4. **POS IP / Server URL 預設值** — 測試階段空白回退到 `192.168.0.162:8099`（⚠️ 測試用，上線前須處理 → [[ISSUE-測試用預設URL待移除]]）

@@ -1,16 +1,17 @@
 ---
 type: project
-status: doing
+status: done
 priority: P1
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-06-04
 tags:
   - type/project
-  - status/doing
+  - status/done
   - priority/P1
 summary: |-
-  FLOW:HID掃描槍輸入→根層級onPreviewKeyEvent+時序啟發式→ScanOrderNo事件→servedList比對→sets tatus=F or 顯示錯誤
-  KEY:複用既有/KDS/SetOrderStatus,全頁面通用,50ms間隔判斷掃描vs人類打字,新事件抽象為未來Intent掃描槍鋪路
+  FLOW:SUNMI廣播(ACTION_DATA_CODE_RECEIVED,extra data=完整訂單號)→震動+ScanOrderNo→查main清單→該單為PREPARED(O)才setStatus=F,否則跳不在待取清單
+  KEY:複用既有/KDS/SetOrderStatus,全頁面通用,SUNMI廣播輸入(非HID),2026-06-04修正:驗證清單從served(F)改main(O)
+  FIX:2026-06-04掃待取單收不到→根因handler查served但後端served=已取(F)→改查main(O);另跳回主頁=掃描器同時開鍵盤輸出(裝置設定關掉)
   DEP:[[訂單狀態流轉]][[POS-API端點]][[KDS訂單管理]][[ISSUE-Collect動畫缺失]]
 ---
 # 掃描槍 Collect 功能（評估中）
@@ -95,3 +96,23 @@ is Event.ScanOrderNo -> {
 - 核心 API：[[訂單狀態流轉]] / [[POS-API端點]]
 - 影響的 UI：[[KDS訂單管理]]
 - 連帶影響的 Issue：[[ISSUE-Collect動畫缺失]] / [[ISSUE-Collect死碼]]
+
+
+
+## 2026-06-04 實作現況 + 重大修正
+
+### 實際實作（與上方設計差異）
+- **輸入接收改用 SUNMI 廣播**（非 onPreviewKeyEvent HID）：`SunmiScanReceiver` 收 `com.sunmi.scanner.ACTION_DATA_CODE_RECEIVED`、extra `data`=訂單號 → `MainActivity` onStart/onStop 註冊 → 震動 + dispatch `ScanOrderNo`。全頁面通用。
+- QR 內容 = **完整訂單號**（如 `P012026060400005`），與後端 OrderNo 完全比對。
+
+### Bug：掃了沒收到（狀態不變）— 已修
+- **症狀**：掃待取的單，狀態沒變（還可能跳回主頁，見下）。
+- **根因**：handler 原本查 `getOrders("served")` 比對。但後端 `served` 自 4/9（commit 673ec39「Served呈現Ｆ」）起回的是**已取(F)**，不是待取(O)。→ 掃**待取(O)的單**永遠不在 F 清單 → 找不到 → 不 Collect。
+- **修法**：改查 `getOrders("main")`（含 J/W/O），且僅在該單 `status == PREPARED(O)`（ignoreCase）時才 `setOrderStatus(COLLECTED)`；否則跳「不在待取餐清單」。
+- **驗證（adb 模擬 SUNMI 廣播）**：O 單掃→收到廣播→查 main→比對 O→SetOrderStatus 200→後端轉 F ✅；已取(F)單掃→查 main→無 SetOrderStatus、跳提示 ✅。
+
+### 另一症狀「跳回主頁」= 掃描器設定問題（非程式）
+logcat 顯示掃描當下除廣播外還有 `SunmiCustomKey interceptKeyBeforeQueueing` 鍵盤事件 → 掃描器同時開了「鍵盤輸出」。修法：SUNMI 掃碼工具 App → 應用設置 → 輸出方式設置 → **只開廣播、關鍵盤模擬輸出**。
+
+### 跨群組注意
+`SetOrderStatus` 是 `WHERE OrderNO=… AND PrintGroup=@KDS_ID` → 掃描只收掉「本 KDS 群組」的品項；同單在其他群組(如 DTF)的品項仍為 O、續留 OrderReady 牆。

@@ -87,11 +87,7 @@ fun KdsScreen(
         viewModel.setEvent(CentralContract.Event.startFetchKdsInfo)
     }
 
-    LaunchedEffect(viewModel.currentState.modeState) {
-        if (viewModel.currentState.modeState == 1) {
-            navigateToOrderReady()
-        }
-    }
+    // 模式切換改由設定頁直接導頁（見 MainActivity setting route），不再用 modeState 在此彈回，避免競態失靈
 
     LaunchedEffect(selectedTabIndex.value) {
         viewModel.updateCurrentPage(selectedTabIndex.value)
@@ -201,7 +197,8 @@ fun KdsScreen(
                 .fillMaxWidth()
                 .weight(1f)
         ) { page ->
-            ReadyForPage(selectedTabIndex, viewModel)
+            // 每一頁用自己的 page 渲染（不要用全域 selectedTabIndex，否則切 tab 會殘影）
+            ReadyForPage(page, viewModel)
         }
 
         Row(
@@ -261,10 +258,10 @@ fun KdsScreen(
 
 @Composable
 fun ReadyForPage(
-    selectedTabIndex: State<Int>,
+    page: Int,
     homeViewModel: CentralViewModel
 ) {
-    when (selectedTabIndex.value) {
+    when (page) {
         0 -> MainPage(homeViewModel)
         1 -> ServedPage(homeViewModel)
         2 -> RecallPage(homeViewModel)
