@@ -965,7 +965,24 @@ class CentralViewModel @Inject constructor(
         }
     }
 
+    /** 訂單相關頁面（主頁/已完成/召回）才需要輪詢；設定頁等其他頁面不輪詢。 */
+    private val orderPages = setOf("main", "served", "recall")
+
+    /**
+     * 是否該進行輪詢。設定是逐字即時儲存的，無法用「欄位有沒有字」判斷是否設定完成，
+     * 因此改用「使用者目前在哪一頁」當訊號：
+     *  - 還停在設定頁（currentPage 非訂單頁）= 仍在設定中 → 不輪詢
+     *  - 切到訂單頁 = 視為設定完成 → 才輪詢
+     * 另外仍要求必要參數有填（POS 位址；KDS 模式還需 KDS 編號），
+     * 避免完全沒設定就被切到訂單頁時送出無效請求一直跳錯誤訊息。
+     */
+    private fun shouldPollOrders(): Boolean {
+        if (currentState.currentPage.lowercase() !in orderPages) return false
+        return prefs.localIp.isNotEmpty() && (prefs.kdsId.isNotEmpty() || prefs.mode != 0)
+    }
+
     private fun fetchOrders() = viewModelScope.launch {
+        if (!shouldPollOrders()) return@launch   // 還在設定中或參數未填，先不輪詢
         repository.getOrders(
             type = currentState.currentPage.lowercase()
         ).collectLatest { result ->
