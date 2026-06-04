@@ -153,3 +153,12 @@ capacity = 每行個數 × 容得下行數
 - **店少 → 列高 → 行數多 → 顯示更多**；店多 → 列矮 → 自動收回（16組直立≈6、4組橫向≈12，實機驗證）。
 - BOM 2024.02（Foundation 1.6）無 FlowRow maxLines，故用 TextMeasurer 計算而非 maxLines。
 - 字級仍依 isPortrait 切 fontMul(0.36/0.27)/fontFloor(13/10)；單號 **FontWeight.Bold**（量測同步帶 Bold）。
+
+
+
+## 新單叮咚音效 (2026-06-04)
+新單變紅時播一聲「叮咚」（門鈴 ding→dong）:
+- 音效檔 `res/raw/dingdong.wav`（自製:E5→C5 兩鐘聲音 + 衰減，python 產生）
+- `SoundPool`(USAGE_NOTIFICATION) 載入；`LaunchedEffect(redSet)` 偵測 **redSet 多出新成員**時 play 一次
+- 與紅底同條件、同時機；**初次載入不播**（prevRed 初始化成當下 redSet），只在看著牆時有新單變紅才響
+- 實機驗證:觸發新待取單→紅底+叮咚 ✅

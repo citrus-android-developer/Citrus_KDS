@@ -25,7 +25,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import android.media.AudioAttributes
+import android.media.SoundPool
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -125,6 +129,34 @@ fun OrderReadyScreen(
     val imgTick = viewModel.currentState.orderReadyTick
     // 店家圖片 base = POS IP 去掉 port（例：http://192.168.0.162），檔名=群組名
     val imgBase = "http://" + prefs.localIp.substringBefore(":")
+
+    // 新單變紅時播「叮咚」音效（只在 redSet 多出新成員時；初次載入不播）
+    val ctx = LocalContext.current
+    val soundPool = remember {
+        SoundPool.Builder()
+            .setMaxStreams(1)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .build()
+    }
+    val dingId = remember { soundPool.load(ctx, R.raw.dingdong, 1) }
+    val dingReady = remember { mutableStateOf(false) }
+    val prevRed = remember { mutableStateOf(redSet) }
+    DisposableEffect(Unit) {
+        soundPool.setOnLoadCompleteListener { _, _, status -> if (status == 0) dingReady.value = true }
+        onDispose { soundPool.release() }
+    }
+    LaunchedEffect(redSet) {
+        val newcomers = redSet - prevRed.value
+        if (newcomers.isNotEmpty() && dingReady.value) {
+            soundPool.play(dingId, 1f, 1f, 1, 0, 1f)
+        }
+        prevRed.value = redSet
+    }
 
     Box(
         modifier = Modifier
