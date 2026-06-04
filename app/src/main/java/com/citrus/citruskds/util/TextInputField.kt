@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import com.citrus.citruskds.ui.*
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorPrimary
+import com.citrus.citruskds.ui.theme.ColorTextPrimaryColor
 import com.citrus.citruskds.ui.theme.ColorWarning
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
 import com.citrus.citruskds.ui.theme.Gray05
@@ -155,7 +156,8 @@ fun TextInputField(
             textStyle = TextStyle(
                 fontFamily = MaterialTheme.typography.bodyMedium.fontFamily,
                 fontSize = fontSize,
-                color = MaterialTheme.colorScheme.onBackground
+                // 輸入框背景固定為淺色，字色改用固定深色，避免深色模式下 onBackground 變淺導致字太淡
+                color = ColorTextPrimaryColor
             ),
             keyboardActions = keyboardActions ?: KeyboardActions(
                 onDone = { focusManager.clearFocus() },
