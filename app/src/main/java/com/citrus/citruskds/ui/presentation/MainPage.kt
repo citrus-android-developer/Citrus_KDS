@@ -304,23 +304,14 @@ private fun MainFeatureBtn(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Timber.d("order status~: $status")
-                    if (orderStatus.uppercase() == PROGRESSING && prefs.isPrepareEnable) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier
-                                .size(10.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                    } else {
-                        Icon(
-                            painter = painterResource(
-                                id = R.drawable.ic_served_fill,
-                            ), contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = Color.White
-                        )
-                    }
+                    // 處理中不再顯示轉圈 loading（會被誤會成在撈資料），一律顯示一般 icon
+                    Icon(
+                        painter = painterResource(
+                            id = R.drawable.ic_served_fill,
+                        ), contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.White
+                    )
 
                     Text(
                         text = stringResource(id = if (orderStatus != PROGRESSING || !prefs.isPrepareEnable) (if (orderStatus == PREPARED) R.string.prepared else R.string.prepare) else R.string.preparing),

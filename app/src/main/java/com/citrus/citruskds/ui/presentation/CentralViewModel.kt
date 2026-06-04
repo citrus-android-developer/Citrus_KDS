@@ -424,6 +424,10 @@ class CentralViewModel @Inject constructor(
                         }
                     })
                 }
+                // 接單(變W)即印廚房單（Print Kitchen Order=Yes，printMode==0）
+                if (prefs.printMode == 0) {
+                    setState { copy(printOrder = event.order) }
+                }
             }
 
             /**Served Collected按鍵觸發*/
@@ -1031,7 +1035,7 @@ class CentralViewModel @Inject constructor(
             .filter { it.orderNo !in autoAcceptedThisSession }
             .forEach { order ->
                 autoAcceptedThisSession.add(order.orderNo)   // 先標記再派發，避免下次輪詢重派
-                autoAcceptDispatch(order.orderNo)
+                autoAcceptDispatch(order)
             }
     }
 
@@ -1039,7 +1043,8 @@ class CentralViewModel @Inject constructor(
      * 自動接單派發：樂觀更新 —— 立即把該單畫面狀態改成 W(製作中)，不等下一輪輪詢；
      * 若 setOrderStatus 失敗，再改回 J(新單) 並提示（不自動重試）。
      */
-    private fun autoAcceptDispatch(orderNo: String) = viewModelScope.launch {
+    private fun autoAcceptDispatch(order: Order) = viewModelScope.launch {
+        val orderNo = order.orderNo
         // 樂觀更新：先把畫面改成製作中（不等下一輪輪詢）
         setState {
             copy(mainList = currentState.mainList?.map {
@@ -1053,18 +1058,29 @@ class CentralViewModel @Inject constructor(
                 status = PROGRESSING
             )
         ).collect { result ->
-            if (result is Result.Error) {
-                Timber.d("autoAccept 派發失敗，還原 $orderNo 為 NEW: ${result.error}")
-                // 失敗：改回 J(新單)
-                setState {
-                    copy(mainList = currentState.mainList?.map {
-                        if (it.orderNo == orderNo) it.copy(status = NEW) else it
-                    })
+            when (result) {
+                is Result.Success -> {
+                    // 接單(變W)成功 → 印廚房單（Print Kitchen Order=Yes，printMode==0）
+                    if (prefs.printMode == 0) {
+                        setState { copy(printOrder = order) }
+                    }
                 }
-                when (result.error) {
-                    is NetworkError -> setState { copy(errMsg = result.error.asUiText()) }
-                    else -> Unit
+
+                is Result.Error -> {
+                    Timber.d("autoAccept 派發失敗，還原 $orderNo 為 NEW: ${result.error}")
+                    // 失敗：改回 J(新單)
+                    setState {
+                        copy(mainList = currentState.mainList?.map {
+                            if (it.orderNo == orderNo) it.copy(status = NEW) else it
+                        })
+                    }
+                    when (result.error) {
+                        is NetworkError -> setState { copy(errMsg = result.error.asUiText()) }
+                        else -> Unit
+                    }
                 }
+
+                else -> Unit
             }
         }
     }

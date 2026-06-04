@@ -21,6 +21,7 @@ class PrintUtil(
 
     /** 列印收據（內容由 [EscPosReceiptBuilder] 1:1 重現舊版） */
     suspend fun setOrderPrint(data: Order) {
+        Timber.d("PRINT_TRACE setOrderPrint 觸發: orderNo=${data.orderNo} printMode=${prefs.printMode} ip=${prefs.printerIp}:${prefs.printerPort}")
         printerDetecter.sendPrintStatus(PrintStatus.Printing)
 
         val ip = prefs.printerIp

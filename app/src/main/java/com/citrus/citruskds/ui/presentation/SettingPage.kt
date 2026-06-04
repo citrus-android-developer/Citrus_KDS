@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.citrus.citruskds.R
 import com.citrus.citruskds.di.prefs
+import com.citrus.citruskds.ui.presentation.widget.ErrorDialog
 import com.citrus.citruskds.ui.presentation.widget.SecurityDialog
 import com.citrus.citruskds.ui.theme.CitrusKDSTheme
 import com.citrus.citruskds.ui.theme.ColorBlue
@@ -99,6 +100,12 @@ fun SettingContent(
             }
         }
 
+        // 測試列印/連線結果（errMsg）在設定頁直接顯示，不必切回主頁
+        if (state.errMsg != null) {
+            ErrorDialog(state.errMsg, onDismissRequest = {
+                event(CentralContract.Event.onDismissErrorDialog)
+            })
+        }
     }
 }
 
