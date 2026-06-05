@@ -183,7 +183,7 @@ fun OneLineItemInfo(
             //回圈方式產生text呈現ename
             for (element in middleList) {
                 Text(
-                    text = " " + element.displayName(),
+                    text = "- " + element.displayName(),
                     color = ColorBlue,
                     modifier = Modifier
                         .padding(start = 20.dp, top = 10.dp)
