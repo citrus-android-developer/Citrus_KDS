@@ -1,0 +1,104 @@
+name: Build and Upload Release APK
+
+# 打 tag v<版本>（例如 v1.1.4）→ 建置已簽章 release APK → 上傳到 hq.citrus.tw/apk/kds/
+# 簽章：keystore(app/kds_key.jks) 與密碼已內建於 app/build.gradle.kts，runner 直接可簽，無需 keystore secret。
+# 需要的 GitHub Secret：UPLOAD_API_KEY（hq.citrus.tw 上傳 API 金鑰，與其他專案共用）
+
+on:
+  push:
+    tags:
+      - 'v*'   # 例如 v1.1.4
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Parse tag & versions
+        id: meta
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "tag: $TAG"
+          if [[ ! $TAG =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "錯誤: tag 格式須為 v<版本>，例如 v1.1.4（收到: $TAG）"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
+          GRADLE_VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          if [[ "$VERSION" != "$GRADLE_VERSION_NAME" ]]; then
+            echo "::warning::tag 版本 ($VERSION) 與 build.gradle.kts versionName ($GRADLE_VERSION_NAME) 不一致，建議打 tag 前先同步 versionName/versionCode"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "apk_name=citruskds_v${VERSION}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Prepare APK + version.json
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          VERSION_CODE="${{ steps.meta.outputs.version_code }}"
+          APK_NAME="${{ steps.meta.outputs.apk_name }}"
+          SRC="app/build/outputs/apk/release/app-release.apk"
+          ls -la "$SRC"
+          cp "$SRC" "$APK_NAME"
+
+          APK_MD5=$(md5sum "$APK_NAME" | awk '{print $1}')
+          APK_SIZE=$(stat -c%s "$APK_NAME")
+          DOWNLOAD_URL="https://hq.citrus.tw/apk/kds/${APK_NAME}"
+
+          cat > version.json << EOF
+          {
+            "latestVersion": "$VERSION",
+            "latestVersionCode": $VERSION_CODE,
+            "releaseDate": "$(date -u +%Y-%m-%d)",
+            "fileSize": $APK_SIZE,
+            "md5": "$APK_MD5",
+            "downloadUrl": "$DOWNLOAD_URL",
+            "forceUpdate": false,
+            "changelog": ["Release v$VERSION"]
+          }
+          EOF
+          echo "----- version.json -----"
+          cat version.json
+
+      - name: Upload APK + version.json to hq.citrus.tw (subPath=kds)
+        env:
+          UPLOAD_API_KEY: ${{ secrets.UPLOAD_API_KEY }}
+        run: |
+          APK_NAME="${{ steps.meta.outputs.apk_name }}"
+          curl -fSsL -X POST "https://hq.citrus.tw/fileUploader/api/upload" \
+            -H "X-API-KEY: $UPLOAD_API_KEY" \
+            -F "subPath=kds" \
+            -F "file=@${APK_NAME}"
+          echo ""
+          curl -fSsL -X POST "https://hq.citrus.tw/fileUploader/api/upload" \
+            -H "X-API-KEY: $UPLOAD_API_KEY" \
+            -F "subPath=kds" \
+            -F "file=@version.json"
+          echo ""
+          echo "下載網址：https://hq.citrus.tw/apk/kds/${APK_NAME}"
+
+      - name: Upload as GitHub artifact (備份)
+        uses: actions/upload-artifact@v4
+        with:
+          name: citruskds_v${{ steps.meta.outputs.version }}
+          path: |
+            ${{ steps.meta.outputs.apk_name }}
+            version.json
+          retention-days: 30
