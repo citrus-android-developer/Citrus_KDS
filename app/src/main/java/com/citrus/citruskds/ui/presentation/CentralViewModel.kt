@@ -90,6 +90,9 @@ class CentralViewModel @Inject constructor(
     private var orderReadyInitialized = false
     /** OrderReady 要標紅的單號集合：最新一批進來的新單，直到下一批新單進來才換 */
     private var orderReadyRedSet = emptySet<String>()
+    /** OrderReady 上一輪各群組的單號順序（依群組索引；後端各群組內依 Finishtime DESC）：偵測被召回刷新時間→超車→標紅。
+     *  用索引而非 OrderName 當 key —— OrderName 可能重複（多個群組同名，如多個 "Citrus"），用名稱會互相覆蓋。*/
+    private var orderReadyPrevGroups = emptyList<List<String>>()
 
     /** 店家圖片刷新 token：只在按下 reload 按鈕時 +1（平常不變→走快取不閃）*/
     private var imgReloadTick = 0
@@ -997,16 +1000,35 @@ class CentralViewModel @Inject constructor(
                 is Result.Success -> {
                     Timber.d("fetchOrderReady: ${result.data}")
                     val currentNos = result.data.flatMap { it.orderNo }.toSet()
+                    // 目前各群組的單號順序（依群組索引，後端各群組內依 Finishtime DESC，最新在最前）
+                    val currentGroups = result.data.map { it.orderNo }
                     if (orderReadyInitialized) {
-                        // 這次才出現的新單 → 成為新的紅色集合（取代上一批）
+                        // (1) 這次才出現的新單
                         val newNos = currentNos - orderReadyPrevSet
-                        if (newNos.isNotEmpty()) {
-                            orderReadyRedSet = newNos
+                        // (2) 被召回刷新 Finishtime → 在同群組內「超車」了上一輪原本排在它前面、且仍在牆上的單
+                        val bumped = currentGroups.flatMapIndexed { gi, cur ->
+                            val prev = orderReadyPrevGroups.getOrElse(gi) { emptyList() }
+                            cur.filter { o ->
+                                val prevIdx = prev.indexOf(o)
+                                if (prevIdx < 0) return@filter false   // 上一輪不在此群組 → 交給 newNos 處理
+                                val curIdx = cur.indexOf(o)
+                                // 上一輪排在 o 前的單，現在還在、卻被排到 o 後 → o 超了車（時間被刷新）
+                                prev.take(prevIdx).any { q ->
+                                    val qCur = cur.indexOf(q)
+                                    qCur > curIdx
+                                }
+                            }
+                        }.toSet()
+                        // 有新單或被召回 → 取代紅色集合為這批「最新的」（同時清掉舊紅）
+                        val fresh = newNos + bumped
+                        if (fresh.isNotEmpty()) {
+                            orderReadyRedSet = fresh
                         }
                     }
                     // 已被取餐/離開牆上的，從紅色集合移除
                     orderReadyRedSet = orderReadyRedSet.intersect(currentNos)
                     orderReadyPrevSet = currentNos
+                    orderReadyPrevGroups = currentGroups
                     orderReadyInitialized = true
                     val redSnapshot = orderReadyRedSet   // 避免 setState lambda 內被 State 同名屬性遮蔽
                     val tickSnapshot = imgReloadTick
