@@ -33,7 +33,7 @@ class KtorDownloadUseCase @Inject constructor(@ApplicationContext private val ap
     suspend fun downloadApk(version: String, onProgressCallBack: (progress: Int) -> Unit): Flow<DownloadStatus> = flow {
         emit(DownloadStatus.Progress(0))
         val url =
-            "http://hq.citrus.tw/apk/compass_kds_v$version.apk"
+            "http://hq.citrus.tw/apk/kds/citruskds_v$version.apk"
 
         Timber.d("downloadApk: $url")
         val httpResponse: HttpResponse = HttpClient().get(url) {
@@ -54,7 +54,7 @@ class KtorDownloadUseCase @Inject constructor(@ApplicationContext private val ap
         return@flow
 
     }.catch { e ->
-        val url = "compass_kds_v$version"
+        val url = "kds/citruskds_v$version"
         emit(DownloadStatus.Error(UiText.DynamicString("${e.message.toString()}\n${url}")))
     }.flowOn(Dispatchers.IO)
 
