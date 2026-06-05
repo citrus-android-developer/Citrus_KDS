@@ -2,7 +2,7 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-04
+updated: 2026-06-05
 tags:
   - type/system
   - status/done
@@ -23,6 +23,7 @@ decisions:
   - content: 取餐牆每組顯示數改為動態量測：capacity = 容得下行數 × 每行個數，用該組最寬字串保守估算保證不裁切；店少→列高→顯示更多，店多→自動收回（寫死 8/6 只是「組多」的特例）
     decided: 2026-06-04
     valid: true
+verified_by: "[[Verification/2026-06-05_取餐牆召回變紅]]"
 ---
 # OrderReady 模式
 
@@ -162,3 +163,12 @@ capacity = 每行個數 × 容得下行數
 - `SoundPool`(USAGE_NOTIFICATION) 載入；`LaunchedEffect(redSet)` 偵測 **redSet 多出新成員**時 play 一次
 - 與紅底同條件、同時機；**初次載入不播**（prevRed 初始化成當下 redSet），只在看著牆時有新單變紅才響
 - 實機驗證:觸發新待取單→紅底+叮咚 ✅
+
+
+## 2026-06-05 召回刷新時間→超車變紅
+- **問題**：召回已在牆上的 O 單 → 後端 `Finishtime=GETDATE()` → 依 Finishtime DESC 重排往前跳，但原紅色判斷只認「新出現的單號」，抓不到既有單被刷新 → 前面的沒紅、舊紅退到第二仍亮。
+- **修正(純 App 端)**：追蹤上一輪**各群組單號順序**，偵測「超車」——某單排到了上一輪原本排在它前面、且仍在牆上的單之前 → 視為被刷新 → 變紅(取代舊紅 + 觸發叮咚)。
+- ⚠️ key 用**群組索引**而非 OrderName —— OrderName 可能重複(多個群組同名，如三個 "Citrus"=PrintGroup 01/03/04)，用名稱會 associate 覆蓋。
+- 可靠性：取餐離開不會造成超車(相對順序不變)，只有召回刷新才超車 → 無誤判。
+- 召回的 SetStatus WHERE 含 `PrintGroup=@KDS_ID`，KDS_ID 必須是品項 PrintGroup。
+- 實機驗證 D3：召回 P08-0027 → 跳最前 + 紅底 + 叮咚 ✅ → [[Verification/2026-06-05_取餐牆召回變紅]]

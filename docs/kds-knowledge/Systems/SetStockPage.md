@@ -111,3 +111,8 @@ setSellStatus (CentralViewModel.kt:525-581) — 兩階段:
 - **狀態文字**：英文 `Available` / `SoldOut`（沿用最初硬編字樣），簡中 `上架中` / `已售完`（保留翻譯）。售完角標共用 `sold_out` → `SOLDOUT` / `已售完`。
 - **損耗送出按鈕文案**：`log` 字串 `登记/Log` → **`送出/Submit`**。
 - **損耗端到端驗證 PASS**：API→DB 欄位全對（GPrice=單價×Qty、Flag='A'、CreateDate=GETDATE()）→ [[Verification/2026-06-05_損耗功能端到端]]。
+
+
+## 2026-06-05(c) 損耗送出成功通知改醒目卡片
+- 原本不顯眼的短 Toast → 改成**畫面中央覆蓋層**：半透明遮罩 + 白圓角卡(綠色打勾 Lottie 140dp + 粗體綠字)，scaleIn+fadeIn、約 1.6 秒自動消失，沿用 `operation_success.json`。
+- 文字雙語 `wastage_submitted`(Wastage submitted / 损耗已送出)。

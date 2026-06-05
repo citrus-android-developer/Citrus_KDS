@@ -85,4 +85,4 @@ if (!prefs.firstInstall && prefs.localIp.isNotBlank()
 
 
 ## 2026-06-04 語系套用移除
-移除原本的 `context.resources.updateConfiguration(...)`（已棄用、不通知 Compose）。語系改由 [[MainActivity]] 的 `CompositionLocalProvider` 統一提供 LocalConfiguration/LocalContext。詳見 [[ISSUE-語系切換套用不一致]]。
+移除原本的 `context.resources.updateConfiguration(...)`（已棄用、不通知 Compose）。語系改由 [[MainActivity入口]] 的 `CompositionLocalProvider` 統一提供 LocalConfiguration/LocalContext。詳見 [[ISSUE-語系切換套用不一致]]。

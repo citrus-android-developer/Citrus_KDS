@@ -21,7 +21,7 @@ summary: |-
 3. 兩套語言來源不同步：靜態字串走 stringResource(locale)，品項名稱直讀 `prefs.language`（English→eName else cName）→ 更新時機/觸發不同 → 錯亂。
 
 ## 修正（2026-06-04）
-- [[MainActivity]] setContent 最外層用 `CompositionLocalProvider` 提供更新後的 `LocalConfiguration` + `LocalContext`(`createConfigurationContext`)，以 `currentState.languageState` 為單一來源 → 語系一改整棵樹一致重組。
+- [[MainActivity入口]] setContent 最外層用 `CompositionLocalProvider` 提供更新後的 `LocalConfiguration` + `LocalContext`(`createConfigurationContext`)，以 `currentState.languageState` 為單一來源 → 語系一改整棵樹一致重組。
 - 移除 KdsScreen 的 updateConfiguration、SettingPage 的 alpha hack。
 - 採用理由：不閃爍、不跳頁、單一來源；相對於 attachBaseContext+recreate() 不需整個 Activity 重建。
 
