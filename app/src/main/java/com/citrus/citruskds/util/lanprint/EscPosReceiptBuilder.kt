@@ -1,6 +1,7 @@
 package com.citrus.citruskds.util.lanprint
 
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.commonData.vo.additionDisplay
 import com.citrus.citruskds.commonData.vo.flavorDisplay
 import com.citrus.citruskds.commonData.vo.isComboMain
 import com.citrus.citruskds.di.prefs
@@ -39,16 +40,6 @@ object EscPosReceiptBuilder {
         text(out, "${prefs.kdsId}\n")
         text(out, "No. ".orCh("单号 ") + order.orderNo + "\n")
 
-        // 加點單：最上方標註「加點」（跟品項名稱同一套語言設定 itemDisplayLan）
-        if (order.addonPrint) {
-            val addonLabel = when (prefs.itemDisplayLan) {
-                "English" -> "ADD ORDER"
-                "华文" -> "加点"
-                else -> "加点 / ADD ORDER"
-            }
-            text(out, "** $addonLabel **\n")
-        }
-
         feed(out, 1)
 
         // 正常字：時間 + 分隔線
@@ -68,8 +59,10 @@ object EscPosReceiptBuilder {
             }
             val flavorStr = d.flavorDisplay(prefs.itemDisplayLan)
             val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
+            val addStr = d.additionDisplay(prefs.itemDisplayLan)
+            val add = if (addStr.isBlank()) "" else "\n#$addStr"
             // 套餐主項(GType G/M)只印名稱、不印數量；其餘正常印「數量 x 名稱」
-            val line = if (d.isComboMain) name + flavor else "${d.qty} x " + name + flavor
+            val line = if (d.isComboMain) name + flavor + add else "${d.qty} x " + name + flavor + add
             text(out, line + "\n")
         }
 
