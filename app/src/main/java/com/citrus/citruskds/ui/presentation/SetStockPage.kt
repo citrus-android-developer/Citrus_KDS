@@ -3,7 +3,10 @@ package com.citrus.citruskds.ui.presentation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,9 +33,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -45,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.R
 import com.citrus.citruskds.ui.presentation.widget.StockItem
@@ -53,6 +60,7 @@ import com.citrus.citruskds.ui.theme.CitrusKDSTheme
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.StockBg
 import com.citrus.citruskds.ui.theme.StockGrayText
+import com.citrus.citruskds.ui.theme.StockGreen
 import com.citrus.citruskds.ui.theme.StockRed
 import com.citrus.citruskds.util.TextInputField
 
@@ -79,11 +87,13 @@ fun SetStockContent(
         event(CentralContract.Event.LoadStockList)
     }
 
-    // 損耗送出成功提示
-    val wastageCtx = androidx.compose.ui.platform.LocalContext.current
+    // 損耗送出成功：畫面中央彈出綠勾卡片（比 Toast 明顯），約 1.6 秒自動消失
+    var showWastageOk by remember { mutableStateOf(false) }
     LaunchedEffect(state.wastageDone) {
         if (state.wastageDone > 0) {
-            android.widget.Toast.makeText(wastageCtx, wastageCtx.getString(R.string.wastage_submitted), android.widget.Toast.LENGTH_SHORT).show()
+            showWastageOk = true
+            kotlinx.coroutines.delay(1600)
+            showWastageOk = false
         }
     }
 
@@ -275,6 +285,52 @@ fun SetStockContent(
                         TextAlign.Center, modifier = Modifier.align(Alignment.Center)
                     )
                 }
+            }
+        }
+
+        // 損耗送出成功：中央綠勾卡片覆蓋層
+        WastageSuccessOverlay(
+            visible = showWastageOk,
+            text = stringResource(id = R.string.wastage_submitted)
+        )
+    }
+}
+
+/** 損耗送出成功覆蓋層：半透明遮罩 + 中央白卡（綠色打勾動畫 + 文字），放大淡入。 */
+@Composable
+private fun WastageSuccessOverlay(visible: Boolean, text: String) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.85f),
+        exit = fadeOut() + scaleOut(targetScale = 0.85f),
+    ) {
+        val ok by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
+        val progress by animateLottieCompositionAsState(ok, iterations = 1, speed = 1.2f)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 56.dp, vertical = 40.dp)
+            ) {
+                LottieAnimation(
+                    composition = ok,
+                    progress = { progress },
+                    modifier = Modifier.size(140.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = text,
+                    color = StockGreen,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
