@@ -2,7 +2,7 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-04
+updated: 2026-06-05
 tags:
   - type/system
   - status/done
@@ -85,3 +85,8 @@ if (orderStatus != PROGRESSING && prefs.isPrepareEnable) {
 
 ## 2026-06-04 MainFeatureBtn 顯示修正
 按鈕文字/顏色改為**一律依實際狀態**（W→处理中/O→待取餐/J→新单、W&O 橘 J 藍），不再讀 `prefs.isPrepareEnable`。修正「W 訂單在 prepareMode 關閉裝置上被誤顯示為新单」的問題（#26）。`isPrepareEnable` 僅保留於 onClick 的 J→W 轉移判斷。詳見 [[訂單狀態流轉]]。
+
+
+
+## 2026-06-05 待取餐按鈕色
+MainFeatureBtn 按鈕色依實際狀態：新單(J)=ColorBlue 藍、製作中(W)=ColorPrimary 橘、**待取餐(O)=ColorPickup #4CAF50 綠**。

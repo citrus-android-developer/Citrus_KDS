@@ -2,7 +2,7 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-06-05
 tags:
   - type/system
   - status/done
@@ -81,3 +81,24 @@ setSellStatus (CentralViewModel.kt:525-581) — 兩階段:
 - 上游：[[KDS訂單管理]]
 - 對應 API：[[POS-API端點]]（`/KDS/SetSellStatus` 本地 + `KDS/SetSellStatus` 遠端）
 - 不走 [[訂單狀態流轉]] / [[輪詢架構]]（這頁不輪詢、不改訂單狀態）
+
+
+
+## 2026-06-05 庫存卡重設計 + 損耗/報廢 + 英文搜尋修正 + i18n
+
+### 卡片重新設計（StockItem，全 inline 無 dialog）
+- 三區：品項名 / 狀態列 / 損耗列。
+- **狀態列**：左「● 上架中(綠) / ● 已售完(紅)」文字 + 右「設為售完(紅) / 設為上架(綠)」切換按鈕（按鈕顯示『要切到的目標』，色＝目標色，animateColorAsState 平滑）。狀態文字看現況、按鈕只管動作。
+- **損耗列**：數量輸入 + 「損耗」按鈕並排，直接送出（無 dialog）；送出成功 Toast。只送損耗(S)，無報廢。
+
+### 損耗/報廢功能（送本地）
+- 事件 `OnSetWastage(stockInfo, qty, status)` → `setWastage` → `POST localIp + /KDS/SetWastage`。
+- CreateUser = `prefs.kdsId`；後端寫 [Wastage] 表（Gname/sizedesc/GPrice 由 Goods 主檔填，GPrice=Price×Qty）。Status：W=報廢/S=損耗（UI 目前只送 S）。
+- 詳見 [[POS-API端點]]、[[資料模型]]。
+
+### 英文模式庫存搜不到（修正）
+- 根因：分類用「該語言分類名」過濾；(1)分類下拉 stockTypeList 只在 stockInfoList 改變時重建，**切語言不重建** →仍是舊語言分類名；(2)選了舊語言分類 → 另一語言用 `gKEName==中文名` 過濾 → 空。
+- 修正(OnLanguageChanged)：切語言時**重建 stockTypeList 為新語言** + 重設已選分類為全部 + 清搜尋；過濾健壯化：未選分類/空搜尋一律顯示全部（避免 gKEName 為 null 被 `null.contains('')` 藏掉）。
+
+### i18n
+品項名/加料/調味在畫面改用 itemDisplayLan（見 [[多語顯示]]）；庫存卡文字（上架中/已售完/設為.../數量/損耗）全用字串資源。

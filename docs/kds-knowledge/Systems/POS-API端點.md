@@ -2,7 +2,7 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-03
+updated: 2026-06-05
 tags:
   - type/system
   - status/done
@@ -101,3 +101,26 @@ UI 層 `collect` 時用 `when (result)` 做分支。
 ### 測試階段混淆點
 
 目前測試 POS（localIp）與 Server（serverUrl）**都指同一台 `192.168.0.162:8099`**（同一個 Compass 後端），所以兩個角色看起來像同一處。架構上是**兩個角色**：本地 POS（門市內網，訂單真實來源）vs 雲端 Compass（global.citrus.tw，跨店/客戶面），正式環境為不同主機。見 [[ISSUE-測試用預設URL待移除]]。
+
+
+
+## 2026-06-04~05 端點與後端異動
+
+### 新增 /KDS/SetWastage（損耗/報廢，本地）
+- Req：GKID/GID/Qty/CreateUser/Status(W=報廢,S=損耗)；其餘後端填。
+- DAL：`INSERT INTO Wastage SELECT ... FROM product.dbo.Goods` —— Gname=GName、sizedesc=Desc、GPrice=Price×Qty、CreateDate=GETDATE()、Flag='A'。
+
+### SetSellStatus 改寫（修「伺服器忙碌中」）
+- 原寫 `ProductBoutique`/`Store`（本地 POS DB 無此表→例外）。
+- **本地 POS** 版改寫 `SoldOutItem`（與 GetInventoryList 讀取端一致）：Available→DELETE、其餘→upsert SOType。
+- **後台同步**：前端 setSellStatus 成功後再打 `serverUrl + KDS/SetSellStatus`（雲端後台 global.citrus.tw/CompassKDS_UAT，維持 ProductBoutique 版）。
+- ⚠️ serverUrl 預設誤設成本地 192.168.0.162:8099，應指雲端後台 UAT，詳見 [[ISSUE-設置庫存]]。
+
+### 訂單明細擴充（OrdersList，加點+雙語用）
+- Detail 新增 `ItemStatus`（per-item，判斷加點）。
+- 加料/調味第二語言：原抓 OrdersItem.FlavorDesc2/AddGName2（多空），改 **JOIN 主檔**：調味 `product.dbo.Flavor.Gname2`(對 FlavorID)、加料 `product.dbo.Goods.GName2`(對 AddGID, GKID=10)；第一語言仍用 OrdersItem。
+
+### SetStatus 來源狀態感知
+- 加 FromStatus（逗號分隔），`AND ItemStatus IN @FromStatuses` 只搬對應品項（見 [[訂單狀態流轉]]、[[加點處理]]）。
+
+> 以上後端皆**待部署到本地 POS 192.168.0.162**（雲端後台 SetSellStatus 維持 ProductBoutique，勿覆蓋）。
