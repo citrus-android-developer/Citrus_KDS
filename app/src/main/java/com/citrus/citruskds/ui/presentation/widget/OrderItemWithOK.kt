@@ -17,6 +17,7 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.citrus.citruskds.commonData.vo.Order
+import com.citrus.citruskds.commonData.vo.displayStatus
 import com.citrus.citruskds.ui.theme.ColorPinkBg
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
 import com.citrus.citruskds.ui.theme.ColorYellowBg
@@ -24,7 +25,11 @@ import com.citrus.citruskds.ui.theme.ColorYellowBg
 @Composable
 fun OrderItemWithOK(modifier: Modifier, order: Order) {
 
-    val composition by rememberLottieComposition(LottieCompositionSpec.Asset("operation_success.json"))
+    // 依「狀態轉換」分色（兩個動畫都在主頁）：
+    //  待取餐(O)被「取餐」→已完成(F)：維持綠色；其餘(製作中 W→待取餐 O，「完成」)：橘色
+    val orange = order.displayStatus().uppercase() != "O"
+    val asset = if (orange) "operation_success_orange.json" else "operation_success.json"
+    val composition by rememberLottieComposition(LottieCompositionSpec.Asset(asset))
     // 加速播放：原始 1.5s（90 frames@60fps）÷ 1.5x ≈ 1s
     val progress by animateLottieCompositionAsState(
         composition,

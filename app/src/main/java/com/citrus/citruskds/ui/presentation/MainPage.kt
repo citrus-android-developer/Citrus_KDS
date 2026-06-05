@@ -60,6 +60,7 @@ import com.citrus.citruskds.ui.presentation.widget.OrderItem
 import com.citrus.citruskds.ui.presentation.widget.OrderItemWithOK
 import com.citrus.citruskds.ui.presentation.widget.TextClock
 import com.citrus.citruskds.ui.theme.ColorBlue
+import com.citrus.citruskds.ui.theme.ColorPickup
 import com.citrus.citruskds.ui.theme.ColorPrimary
 import com.citrus.citruskds.util.Constants.PREPARED
 import com.citrus.citruskds.util.Constants.PROGRESSING
@@ -298,12 +299,22 @@ private fun MainFeatureBtn(
                         finish()
                     }
                 },
-                // 顏色一律依實際狀態：新單(J)=藍，製作中(W)/待取(O)=橘
-                colors = ButtonDefaults.buttonColors(if (orderStatus == PROGRESSING || orderStatus == PREPARED) ColorPrimary else ColorBlue),
+                // 顏色一律依實際狀態：新單(J)=藍，製作中(W)=橘，待取(O)=綠(#4CAF50)
+                colors = ButtonDefaults.buttonColors(
+                    when (orderStatus) {
+                        PREPARED -> ColorPickup
+                        PROGRESSING -> ColorPrimary
+                        else -> ColorBlue
+                    }
+                ),
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(
                     4.dp,
-                    if (orderStatus == PROGRESSING || orderStatus == PREPARED) ColorPrimary else ColorBlue
+                    when (orderStatus) {
+                        PREPARED -> ColorPickup
+                        PROGRESSING -> ColorPrimary
+                        else -> ColorBlue
+                    }
                 ),
                 modifier = Modifier
                     .pressClickEffect {}

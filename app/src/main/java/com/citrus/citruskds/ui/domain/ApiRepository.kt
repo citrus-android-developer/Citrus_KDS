@@ -9,6 +9,7 @@ import com.citrus.citruskds.commonData.vo.OrderReadyInfo
 import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
 import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
+import com.citrus.citruskds.commonData.vo.SetWastageRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 
 interface ApiRepository {
@@ -19,5 +20,6 @@ interface ApiRepository {
     suspend fun setInventory(setInventoryRequest: SetInventoryRequest): Flow<Result<Unit, RootError>>
     suspend fun setSellStatus(setItemSellStatusRequest: SetItemSellStatusRequest): Flow<Result<Unit, RootError>>
     suspend fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest): Flow<Result<Unit, RootError>>
+    suspend fun setWastage(setWastageRequest: SetWastageRequest): Flow<Result<Unit, RootError>>
     suspend fun setOrdersNotifyRemote(ordersNotifyRequest: OrdersNotifyRequest): Flow<Result<Unit, RootError>>
 }

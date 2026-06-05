@@ -36,6 +36,7 @@ import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.flavorDisplay
 import com.citrus.citruskds.commonData.vo.isComboMain
+import com.citrus.citruskds.commonData.vo.nameDisplay
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
@@ -100,9 +101,8 @@ fun AllItemDialog(
                         .align(Alignment.Start),
                     content = {
                         items(order.detail.size) { index ->
-                            val name =
-                                if (prefs.language == "English") order.detail[index].eName else order.detail[index].cName
-                            val flavorStr = order.detail[index].flavorDisplay(prefs.language)
+                            val name = order.detail[index].nameDisplay(prefs.itemDisplayLan)
+                            val flavorStr = order.detail[index].flavorDisplay(prefs.itemDisplayLan)
                             val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
                             androidx.compose.material3.Text(
                                 // 套餐主項(G/M)只顯示名稱、不顯示數量

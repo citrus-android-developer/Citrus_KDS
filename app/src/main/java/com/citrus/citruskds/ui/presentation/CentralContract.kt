@@ -28,6 +28,8 @@ class CentralContract {
         data class RecallOrder(val orderNo: String, val status: String = "O", val fromStatus: String = "O,F") : Event()
         data class OnStockItemClicked(val stockInfo: StockInfo) : Event()
         data class OnSetInventory(val stock: StockInfo) : Event()
+        /** 損耗/報廢：對品項輸入數量送本地。status：W=報廢、S=損耗 */
+        data class OnSetWastage(val stockInfo: StockInfo, val qty: Int, val status: String) : Event()
         data class OnPrinterSelected(val info: Map<String, String>) : Event()
         data object TestPrinter : Event()
         data object ScanPrinters : Event()
@@ -89,6 +91,8 @@ class CentralContract {
         var printRequestId: Int = 0,
         var printerInfo: ArrayList<Map<String, String>>? = null,
         var printStatus: PrintStatus = PrintStatus.Idle,
+        // 損耗送出成功計數（UI 觀察以提示「已送出」）
+        var wastageDone: Int = 0,
         var setStatusGkidGid: Pair<String, String>? = null,   //setSellStatus之後紀錄改變了哪一個，在filter list中找到並更新
         var downloadStatus: DownloadStatus? = null,
     ) : UiState

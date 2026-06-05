@@ -86,4 +86,16 @@
     <string name="handlingmsg_err_wait_removal">Please remove paper.\n</string>
     <string name="handlingmsg_err_voltage">Please check the voltage status.\n</string>
 
+    <!-- 库存/损耗/状态 -->
+    <string name="on_sale">上架中</string>
+    <string name="sold_out">已售完</string>
+    <string name="set_sold_out">设为售完</string>
+    <string name="set_on_sale">设为上架</string>
+    <string name="qty">数量</string>
+    <string name="wastage">损耗</string>
+    <string name="wastage_submitted">损耗已送出</string>
+    <string name="test_connection">测试连接</string>
+    <string name="all_categories">全部分类</string>
+    <string name="log">登记</string>
+
 </resources>

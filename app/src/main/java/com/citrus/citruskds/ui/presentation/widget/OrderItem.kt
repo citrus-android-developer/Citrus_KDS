@@ -31,6 +31,7 @@ import com.citrus.citruskds.commonData.vo.displayStatus
 import com.citrus.citruskds.commonData.vo.flavorDisplay
 import com.citrus.citruskds.commonData.vo.isComboMain
 import com.citrus.citruskds.commonData.vo.isSideDish
+import com.citrus.citruskds.commonData.vo.nameDisplay
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.CentralContract
 import com.citrus.citruskds.ui.theme.ColorBlue
@@ -38,9 +39,9 @@ import com.citrus.citruskds.ui.theme.ColorPinkBg
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
 import com.citrus.citruskds.ui.theme.ColorYellowBg
 
-/** 品項顯示名稱：依系統語系挑（與 ServedItem / AllItemDialog 一致）*/
+/** 品項顯示名稱：依「訂單品項語言」itemDisplayLan 挑（支援 English & 华文 雙語並列）*/
 private fun Detail.displayName(): String =
-    if (prefs.language == "English") eName else cName
+    nameDisplay(prefs.itemDisplayLan)
 
 @Composable
 fun OrderItem(
@@ -127,9 +128,9 @@ fun OrderItem(
 
             orderDetail.filter { !it.isSideDish }.forEachIndexed { index, data ->
 
-                val flavorStr = data.flavorDisplay(prefs.language)
+                val flavorStr = data.flavorDisplay(prefs.itemDisplayLan)
                 val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
-                val addStr = data.additionDisplay(prefs.language)
+                val addStr = data.additionDisplay(prefs.itemDisplayLan)
                 val add = if (addStr.isBlank()) "" else "\n#$addStr"
 
                 OneLineItemInfo(

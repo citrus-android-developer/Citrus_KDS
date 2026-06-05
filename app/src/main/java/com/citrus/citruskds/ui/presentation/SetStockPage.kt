@@ -51,6 +51,9 @@ import com.citrus.citruskds.ui.presentation.widget.StockItem
 import com.citrus.citruskds.ui.presentation.widget.TextClock
 import com.citrus.citruskds.ui.theme.CitrusKDSTheme
 import com.citrus.citruskds.ui.theme.ColorBlue
+import com.citrus.citruskds.ui.theme.StockBg
+import com.citrus.citruskds.ui.theme.StockGrayText
+import com.citrus.citruskds.ui.theme.StockRed
 import com.citrus.citruskds.util.TextInputField
 
 
@@ -71,16 +74,24 @@ fun SetStockContent(
     event: (CentralContract.Event) -> Unit
 ) {
     val composition by rememberLottieComposition(LottieCompositionSpec.Asset("no_data.json"))
-    val columns = GridCells.Fixed(5)
+    val columns = GridCells.Fixed(4)
     LaunchedEffect(Unit) {
         event(CentralContract.Event.LoadStockList)
+    }
+
+    // 損耗送出成功提示
+    val wastageCtx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(state.wastageDone) {
+        if (state.wastageDone > 0) {
+            android.widget.Toast.makeText(wastageCtx, wastageCtx.getString(R.string.wastage_submitted), android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     val isExpanded = remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White),
+            .background(StockBg),
         contentAlignment = Alignment.Center
     ) {
 
@@ -93,30 +104,39 @@ fun SetStockContent(
                     .padding(vertical = 16.dp)
             ) {
 
-                TextClock(
+                Column(
                     modifier = Modifier
                         .padding(start = 26.dp)
                         .align(Alignment.CenterVertically),
-                    color = ColorBlue,
-                    format = "kk:mm:ss",
-                    style = TextStyle(
-                        fontSize = 24.sp,
-                        color = ColorBlue,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = stringResource(id = R.string.category),
-                        color = ColorBlue,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
+                    TextClock(
+                        color = StockRed,
+                        format = "kk:mm:ss",
+                        style = TextStyle(
+                            fontSize = 34.sp,
+                            color = StockRed,
+                            fontWeight = FontWeight.Bold
+                        )
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    TextClock(
+                        color = StockGrayText,
+                        format = "EEE, MMM d",
+                        style = TextStyle(
+                            fontSize = 14.sp,
+                            color = StockGrayText,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = stringResource(id = R.string.category).trim().uppercase(),
+                        color = StockGrayText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(start = 6.dp, bottom = 4.dp)
+                    )
                     ExposedDropdownMenuBox(
                         modifier = Modifier.width(300.dp),
                         expanded = isExpanded.value,
@@ -126,7 +146,7 @@ fun SetStockContent(
                     ) {
                         TextInputField(
                             textFieldValue = state.stockTypeSelect,
-                            placeholder = stringResource(id = R.string.select_type),
+                            placeholder = stringResource(id = R.string.all_categories),
                             readOnly = true,
                             trailingIcon = {
                                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = isExpanded.value)
@@ -142,6 +162,14 @@ fun SetStockContent(
                                 isExpanded.value = false
                             }
                         ) {
+                            // 全部分類（重設）
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = R.string.all_categories)) },
+                                onClick = {
+                                    event(CentralContract.Event.OnStockTypeChanged(""))
+                                    isExpanded.value = false
+                                }
+                            )
                             state.stockTypeList?.forEach { type ->
                                 DropdownMenuItem(
                                     text = {
@@ -228,6 +256,8 @@ fun SetStockContent(
 //                                    val stock = dataList[index].copy()
 //                                    stock.stock = it.toString()
 //                                    event(CentralContract.Event.OnSetInventory(stock))
+                                }, onWastage = { qty, status ->
+                                    event(CentralContract.Event.OnSetWastage(dataList[index], qty, status))
                                 })
                             }
 

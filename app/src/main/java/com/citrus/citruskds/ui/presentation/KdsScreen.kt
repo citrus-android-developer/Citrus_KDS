@@ -238,7 +238,7 @@ fun KdsScreen(
                 viewModel.setEvent(CentralContract.Event.onDismissErrorDialog)
             },
             // 列印失敗可重印上一張快照（含加點），不受狀態已升級影響
-            confirmText = if (prefs.language == "English") "Reprint" else "重印",
+            confirmText = stringResource(id = R.string.reprint),
             onConfirm = {
                 printErrShowing = false
                 viewModel.setEvent(CentralContract.Event.RetryPrintOrder)

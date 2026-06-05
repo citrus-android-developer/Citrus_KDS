@@ -94,6 +94,9 @@ val Detail.isSideDish: Boolean get() = gType == "S" || gType == "R"
  * 第二語言為空時 fallback 第一語言（後端資料常缺第二語言），反之亦然。
  * lan: "English" / "华文" / "English & 华文"（後者中英並列）
  */
+/** 依「訂單品項語言」設定挑品項名稱。lan: English / 华文 / English & 华文(中英並列)；空則 fallback 另一語言 */
+fun Detail.nameDisplay(lan: String): String = pickLang(cName, eName, lan)
+
 fun Detail.flavorDisplay(lan: String): String = pickLang(flavor, flavor2, lan)
 
 /** 依語言設定挑加料顯示字串（規則同 [flavorDisplay]）。 */

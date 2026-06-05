@@ -21,6 +21,7 @@ import com.citrus.citruskds.commonData.vo.isPending
 import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
 import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
+import com.citrus.citruskds.commonData.vo.SetWastageRequest
 import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.di.prefs
@@ -138,20 +139,19 @@ class CentralViewModel @Inject constructor(
                     name to list
                 }.collectLatest { (name, list) ->
 
+                    val typeSel = currentState.stockTypeSelected
                     val stockInfoFilterPresentList = currentState.stockInfoList?.filter {
-                        if (prefs.language == "English") {
-                            it.gKEName?.contains(
-                                currentState.stockTypeSelected,
-                                ignoreCase = true
-                            ) == true
+                        // 未選分類(空)→全顯示；避免英文模式下分類名為 null 的品項被藏起來
+                        if (typeSel.isBlank()) true
+                        else if (prefs.language == "English") {
+                            it.gKEName?.contains(typeSel, ignoreCase = true) == true
                         } else {
-                            it.gKCName?.contains(
-                                currentState.stockTypeSelected,
-                                ignoreCase = true
-                            ) == true
+                            it.gKCName?.contains(typeSel, ignoreCase = true) == true
                         }
                     }?.filter {
-                        if (prefs.language == "English") {
+                        // 搜尋字串空→全顯示
+                        if (name.isBlank()) true
+                        else if (prefs.language == "English") {
                             it.eName?.contains(name, ignoreCase = true) == true
                         } else {
                             it.cName?.contains(name, ignoreCase = true) == true
@@ -369,6 +369,21 @@ class CentralViewModel @Inject constructor(
                             )
                         )
                     }
+
+                    // 庫存分類是用「該語言的分類名稱」過濾。切語言後：
+                    //  (1) 重建分類下拉清單為新語言（否則仍顯示舊語言分類名，選了也對不上）
+                    //  (2) 重設已選分類為全部、清搜尋、列表回全部
+                    val newTypeList = currentState.stockInfoList
+                        ?.groupBy { if (event.lan == "English") it.gKEName else it.gKCName }
+                        ?.map { it.key ?: "" }
+                    setState {
+                        copy(
+                            stockTypeList = newTypeList,
+                            stockTypeSelected = "",
+                            stockTypeSelect = InputStateWrapper(state = TextFieldState("")),
+                            stockInfoPresentList = currentState.stockInfoList,
+                        )
+                    }
                 }
             }
 
@@ -454,7 +469,9 @@ class CentralViewModel @Inject constructor(
                 setState {
                     copy(
                         stockInfoPresentList = currentState.stockInfoList?.filter {
-                            if (prefs.language == "English") {
+                            // 空 = 全部分類
+                            if (event.type.isBlank()) true
+                            else if (prefs.language == "English") {
                                 it.gKEName == event.type
                             } else {
                                 it.gKCName == event.type
@@ -481,8 +498,10 @@ class CentralViewModel @Inject constructor(
                         gID = event.stockInfo.gID ?: "",
                         gKID = event.stockInfo.gKID ?: "",
                         status = if (event.stockInfo.sellStatus == "Available") "Sold Out" else "Available",
-                        storeNo = prefs.rsno,
-                        gname = event.stockInfo.eName ?: event.stockInfo.cName ?: "",
+                        storeNo = prefs.rsno.trim(),
+                        // 英文名(eName)可能為空字串 → fallback 中文名，避免送出空 Gname 被後端 [Required] 擋 400
+                        gname = event.stockInfo.eName?.takeIf { it.isNotBlank() }
+                            ?: event.stockInfo.cName?.takeIf { it.isNotBlank() } ?: "-",
                         size = event.stockInfo.size ?: ""
                     )
                 )
@@ -491,6 +510,23 @@ class CentralViewModel @Inject constructor(
             /**設定品項庫存*/
             is CentralContract.Event.OnSetInventory -> {
                 //setInventory(event.stock)
+            }
+
+            /**損耗/報廢：對品項送出數量到本地*/
+            is CentralContract.Event.OnSetWastage -> {
+                if (event.stockInfo.gID?.isBlank() == true || event.stockInfo.gKID?.isBlank() == true || event.qty <= 0) {
+                    setState { copy(errMsg = UiText.StringResource(R.string.item_abnormal)) }
+                    return
+                }
+                setWastage(
+                    SetWastageRequest(
+                        gKID = event.stockInfo.gKID ?: "",
+                        gID = event.stockInfo.gID ?: "",
+                        qty = event.qty,
+                        status = event.status,
+                        createUser = prefs.kdsId
+                    )
+                )
             }
 
             /**選擇掃描到的印表機 → 填入 IP*/
@@ -714,6 +750,29 @@ class CentralViewModel @Inject constructor(
     }
 
 
+    /** 損耗/報廢：送本地 POS 寫入 Wastage */
+    private fun setWastage(req: SetWastageRequest) {
+        viewModelScope.launch {
+            repository.setWastage(req).collect { result ->
+                when (result) {
+                    is Result.Loading -> Timber.d("setWastage: ${result.isLoading}")
+                    is Result.Success -> {
+                        Timber.d("setWastage: success")
+                        setState { copy(wastageDone = wastageDone + 1) }
+                    }
+
+                    is Result.Error -> {
+                        Timber.d("setWastage: ${result.error}")
+                        when (result.error) {
+                            is NetworkError -> setState { copy(errMsg = result.error.asUiText()) }
+                            else -> Unit
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private fun setSellStatusRemote(setItemSellStatusRequest: SetItemSellStatusRequest) {
         viewModelScope.launch {
             repository.setSellStatusRemote(setItemSellStatusRequest).collect { result ->
@@ -876,16 +935,12 @@ class CentralViewModel @Inject constructor(
                     setState {
                         copy(stockInfoList = result.data,
                             stockInfoPresentList = result.data.filter {
-                                if (prefs.language == "English") {
-                                    it.gKEName?.contains(
-                                        currentState.stockTypeSelected,
-                                        ignoreCase = true
-                                    ) == true
+                                val typeSel = currentState.stockTypeSelected
+                                if (typeSel.isBlank()) true
+                                else if (prefs.language == "English") {
+                                    it.gKEName?.contains(typeSel, ignoreCase = true) == true
                                 } else {
-                                    it.gKCName?.contains(
-                                        currentState.stockTypeSelected,
-                                        ignoreCase = true
-                                    ) == true
+                                    it.gKCName?.contains(typeSel, ignoreCase = true) == true
                                 }
                             }
                         )

@@ -10,6 +10,7 @@ import com.citrus.citruskds.commonData.vo.OrderRequest
 import com.citrus.citruskds.commonData.vo.OrdersNotifyRequest
 import com.citrus.citruskds.commonData.vo.SetInventoryRequest
 import com.citrus.citruskds.commonData.vo.SetItemSellStatusRequest
+import com.citrus.citruskds.commonData.vo.SetWastageRequest
 import com.citrus.citruskds.commonData.vo.SetOrderStatusRequest
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.di.prefs
@@ -19,6 +20,7 @@ import com.citrus.citruskds.util.Constants.POS_GET_STOCK_INFO
 import com.citrus.citruskds.util.Constants.POS_SET_INVENTORY
 import com.citrus.citruskds.util.Constants.POS_SET_ORDER_STATUS
 import com.citrus.citruskds.util.Constants.POS_SET_SELL_STATUS
+import com.citrus.citruskds.util.Constants.POS_SET_WASTAGE
 import com.citrus.citruskds.util.Constants.SERVER_SET_ORDERS_NOTIFY
 import com.citrus.citruskds.util.Constants.SERVER_SET_SELL_STATUS
 import com.citrus.citruskds.util.resultFlowData
@@ -83,6 +85,14 @@ class ApiRepositoryImpl @Inject constructor(private val apiService: ApiService) 
                 setItemSellStatusRequest = setItemSellStatusRequest
             )
         }, feature = "SetSellStatusRemote: ") as Flow<Result<Unit, RootError>>
+
+    override suspend fun setWastage(setWastageRequest: SetWastageRequest): Flow<Result<Unit, RootError>> =
+        resultFlowData(apiAction = {
+            apiService.setWastage(
+                url = "http://" + prefs.localIp + POS_SET_WASTAGE,
+                setWastageRequest = setWastageRequest
+            )
+        }, feature = "SetWastage: ") as Flow<Result<Unit, RootError>>
 
     override suspend fun setOrdersNotifyRemote(ordersNotifyRequest: OrdersNotifyRequest): Flow<Result<Unit, RootError>> =
         resultFlowData(apiAction = {

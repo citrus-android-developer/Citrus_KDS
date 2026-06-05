@@ -370,17 +370,13 @@ private fun ConnectParams(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(text = "測試連線", color = Color.White, fontSize = 14.sp)
+                            Text(
+                                text = stringResource(id = R.string.test_connection),
+                                color = Color.White,
+                                fontSize = 14.sp
+                            )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Button(
-                            onClick = { event(CentralContract.Event.ScanPrinters) },
-                            colors = ButtonDefaults.buttonColors(ColorBlue),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(text = "掃描", color = Color.White, fontSize = 14.sp)
-                        }
+                        // 掃描按鈕已隱藏（不需要）
                     }
 
                     if (!state.printerInfo.isNullOrEmpty()) {
