@@ -9,6 +9,8 @@
     "updated": "date",
     "summary": "text",
     "priority": "text",
-    "decisions": "multitext"
+    "decisions": "multitext",
+    "valid_under": "text",
+    "verified_by": "multitext"
   }
 }

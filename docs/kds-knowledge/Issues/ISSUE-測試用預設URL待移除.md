@@ -33,3 +33,10 @@ tags:
 - [[Systems/Prefs偏好設定]]
 - [[Systems/POS-API端點]]
 - [[Systems/設定頁]]
+
+
+
+## 2026-06-05 進度：Server URL 預設已改雲端
+- `DEFAULT_SERVER_URL` 已改成 `Constants.BASE_URL`（雲端 UAT）→ **Server URL 的本地寫死預設已解除**（採決策 (b) 綁環境 URL，單一來源）。
+- 仍待處理：`DEFAULT_POS_IP` 仍是 `192.168.0.162:8099`（本地 POS 本應指本地；正式各店不同 → 傾向「空白強制手動填」或部署時帶值）。
+- 新發現並修正「Server URL 留空→遠端打到本地 POS 假成功、未同步雲端」陷阱（見 [[Systems/設定頁]] / [[Systems/POS-API端點]]）。

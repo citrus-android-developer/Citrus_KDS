@@ -10,6 +10,7 @@ summary: |-
   FLOW:LoadStockList→getStockInfo→點品項→setSellStatus兩階段(local→remote)→remote失敗回滾local
   KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解)
   DEP:[[POS-API端點]][[KDS訂單管理]][[Prefs偏好設定]]
+verified_by: "[[Verification/2026-06-05_損耗功能端到端]]"
 ---
 # SetStockPage
 
@@ -102,3 +103,11 @@ setSellStatus (CentralViewModel.kt:525-581) — 兩階段:
 
 ### i18n
 品項名/加料/調味在畫面改用 itemDisplayLan（見 [[多語顯示]]）；庫存卡文字（上架中/已售完/設為.../數量/損耗）全用字串資源。
+
+
+
+## 2026-06-05(b) StockItem 文案/狀態列定案 + 損耗已驗證
+- **狀態列定案**：圓點 + 狀態文字 + **Material Switch**（非先前迭代的「設為售完/設為上架」文字按鈕）。狀態文字＝反映現況。
+- **狀態文字**：英文 `Available` / `SoldOut`（沿用最初硬編字樣），簡中 `上架中` / `已售完`（保留翻譯）。售完角標共用 `sold_out` → `SOLDOUT` / `已售完`。
+- **損耗送出按鈕文案**：`log` 字串 `登记/Log` → **`送出/Submit`**。
+- **損耗端到端驗證 PASS**：API→DB 欄位全對（GPrice=單價×Qty、Flag='A'、CreateDate=GETDATE()）→ [[Verification/2026-06-05_損耗功能端到端]]。
