@@ -2,15 +2,17 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-05
+updated: 2026-06-08
 tags:
   - type/system
   - status/done
 summary: |-
   FLOW:LoadStockList→getStockInfo→點品項→setSellStatus兩階段(local→remote)→remote失敗回滾local
-  KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解)
-  DEP:[[POS-API端點]][[KDS訂單管理]][[Prefs偏好設定]]
-verified_by: "[[Verification/2026-06-05_損耗功能端到端]]"
+  KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解),remote改送精簡body(StoreNo/GKID/GID/Status)且Status映射SoldOut→NotAvailable(local仍full body+SoldOut)
+  DEP:[[POS-API端點]][[KDS訂單管理]][[Prefs偏好設定]][[SetSellStatus-Remote串接]]
+verified_by:
+  - "[[Verification/2026-06-05_損耗功能端到端]]"
+  - "[[Verification/2026-06-08_soldout_remote精簡contract]]"
 ---
 # SetStockPage
 
@@ -116,3 +118,14 @@ setSellStatus (CentralViewModel.kt:525-581) — 兩階段:
 ## 2026-06-05(c) 損耗送出成功通知改醒目卡片
 - 原本不顯眼的短 Toast → 改成**畫面中央覆蓋層**：半透明遮罩 + 白圓角卡(綠色打勾 Lottie 140dp + 粗體綠字)，scaleIn+fadeIn、約 1.6 秒自動消失，沿用 `operation_success.json`。
 - 文字雙語 `wastage_submitted`(Wastage submitted / 损耗已送出)。
+
+## 2026-06-08 更新：remote 改精簡 contract + Status 映射
+
+階段 2（遠端 Compass）不再沿用 local 的 full body，改送精簡 body 並映射 Status：
+
+- 新增 `SetItemSellStatusRemoteRequest`（只 `StoreNo/GKID/GID/Status`），Gname/Size 由雲端自 Goods 主檔補。
+- `ApiRepositoryImpl.setSellStatusRemote` 內把 full request 轉精簡，並映射 Status：`Available→Available`、其餘(Sold Out)→`Not Available`（雲端值域只收這兩值）。
+- **local（階段 1）完全不變**：仍送含 Gname/Size 的 full body、Status 維持 `Sold Out`。
+- 兩階段 + 回滾流程不變。
+
+串接細節與踩雷（部署版本差異、IIS Content-Length、ApiStatus 雙重判斷）見 [[SetSellStatus-Remote串接]]。實機驗證見 [[Verification/2026-06-08_soldout_remote精簡contract]]。

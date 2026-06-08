@@ -2,16 +2,18 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-05
+updated: 2026-06-08
 tags:
   - type/system
   - status/done
 summary: |-
   AUTH:內網信任+KDS_ID識別(請求帶硬編ApiKey header,見ISSUE)｜本地POS(prefs.localIp)+遠端Compass(prefs.serverBaseUrl,設定頁可改)
-  KEY:7支本地(含SetWastage損耗)+2支遠端,/controller/OrdersList路徑風格特殊,resultFlowData統一包裝,Server預設=BASE_URL雲端(localIp預設本地8099)
-  FLOW:訂單(抓單+改製作狀態setOrderStatus)只走POS｜售罄=App雙寫(POS成功再寫Server,Server失敗還原本地)｜推播走Server｜無POS主動syncServer機制,App當orchestrator
-  DEP:[[訂單狀態流轉]][[KDS訂單管理]][[OrderReady模式]][[輪詢架構]][[Prefs偏好設定]][[ISSUE-測試用預設URL待移除]]
-verified_by: "[[Verification/2026-06-05_損耗功能端到端]]"
+  KEY:7支本地(含SetWastage損耗)+2支遠端,/controller/OrdersList路徑風格特殊,resultFlowData統一包裝,Server預設=BASE_URL雲端(localIp預設本地8099),遠端SetSellStatus為精簡contract(StoreNo/GKID/GID/Status,Gname/Size後端補)且Status僅Available/NotAvailable
+  FLOW:訂單(抓單+改製作狀態setOrderStatus)只走POS｜售罄=App雙寫(POS full body+SoldOut成功→再寫Server精簡body+Status映射NotAvailable,Server失敗還原本地)｜推播走Server｜無POS主動syncServer機制,App當orchestrator
+  DEP:[[訂單狀態流轉]][[KDS訂單管理]][[OrderReady模式]][[輪詢架構]][[Prefs偏好設定]][[SetSellStatus-Remote串接]][[ISSUE-測試用預設URL待移除]]
+verified_by:
+  - "[[Verification/2026-06-05_損耗功能端到端]]"
+  - "[[Verification/2026-06-08_soldout_remote精簡contract]]"
 ---
 # POS-API 端點
 
