@@ -33,6 +33,11 @@
     <string name="json_serialization_error">Json解析错误</string>
     <string name="server_error">伺服器发生错误</string>
     <string name="connection_error">连线失败, 请检查Pos IP</string>
+    <string name="server_url_not_set">尚未设定 Server URL，请至设定页填入</string>
+    <string name="printer_ip_required">请先输入印表机 IP</string>
+    <string name="printer_connect_success">印表机连线成功 ✓ (%1$s)</string>
+    <string name="printer_connect_failed">印表机连线失败 ✗ (%1$s)</string>
+    <string name="download_failed">下载失败</string>
     <string name="unknown_error">发生未知的错误</string>
     <string name="no_result">没有匹配的搜寻结果</string>
     <string name="please_select_type">请选择品项分类</string>

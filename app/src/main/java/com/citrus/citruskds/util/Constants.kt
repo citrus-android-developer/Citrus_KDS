@@ -35,12 +35,11 @@ object Constants {
     //const val BASE_URL = "https://global.citrus.tw/CompassKDS/"
     const val BASE_URL = "https://global.citrus.tw/CompassKDS_UAT/"
 
-    /** Server URL 預設值（設定頁未填時的回退值）：回退到雲端後台 BASE_URL，
-     *  避免誤導向本地 POS（本地 POS 也有 SetSellStatus，會「假成功」但其實沒同步雲端後台）。*/
-    const val DEFAULT_SERVER_URL = BASE_URL
+    /** Server URL 預設值：留空，強制各店於設定頁手動填入正式 Server URL。 */
+    const val DEFAULT_SERVER_URL = ""
 
-    /** POS IP 預設值（設定頁未填時的回退值；格式 host:port）*/
-    const val DEFAULT_POS_IP = "192.168.0.162:8099"
+    /** POS IP 預設值：留空，強制各店於設定頁手動填入本地 POS IP（格式 host:port）。 */
+    const val DEFAULT_POS_IP = ""
 
 
     var df = DecimalFormat("#,###,##0.###")

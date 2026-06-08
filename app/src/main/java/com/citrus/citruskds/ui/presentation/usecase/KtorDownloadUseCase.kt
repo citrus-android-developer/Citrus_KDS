@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import com.citrus.citruskds.APK_FILE_NAME
+import com.citrus.citruskds.R
 import com.citrus.citruskds.util.UiText
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.ktor.client.HttpClient
@@ -49,13 +50,31 @@ class KtorDownloadUseCase @Inject constructor(@ApplicationContext private val ap
             getFile().writeBytes(responseBody)
             emit(DownloadStatus.Success)
         } else {
-            emit(DownloadStatus.Error(UiText.DynamicString(httpResponse.status.description)))
+            emit(
+                DownloadStatus.Error(
+                    UiText.MultiUiText(
+                        listOf(
+                            UiText.StringResource(R.string.download_failed),
+                            UiText.DynamicString(httpResponse.status.description)
+                        )
+                    )
+                )
+            )
         }
         return@flow
 
     }.catch { e ->
         val url = "kds/citruskds_v$version"
-        emit(DownloadStatus.Error(UiText.DynamicString("${e.message.toString()}\n${url}")))
+        emit(
+            DownloadStatus.Error(
+                UiText.MultiUiText(
+                    listOf(
+                        UiText.StringResource(R.string.download_failed),
+                        UiText.DynamicString("${e.message.toString()}\n${url}")
+                    )
+                )
+            )
+        )
     }.flowOn(Dispatchers.IO)
 
 

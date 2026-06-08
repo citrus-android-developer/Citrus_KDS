@@ -69,6 +69,10 @@ fun NetworkError.asUiText(): UiText {
             )
         )
 
+        is NetworkError.ServerUrlNotSet -> UiText.StringResource(
+            R.string.server_url_not_set
+        )
+
         is NetworkError.UnknownError -> UiText.MultiUiText(
             listOf(
                 UiText.DynamicString(errMsg ?: ""),

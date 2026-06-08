@@ -544,15 +544,17 @@ class CentralViewModel @Inject constructor(
                 viewModelScope.launch {
                     val ip = prefs.printerIp
                     if (ip.isBlank()) {
-                        setState { copy(errMsg = UiText.DynamicString("請先輸入印表機 IP")) }
+                        setState { copy(errMsg = UiText.StringResource(R.string.printer_ip_required)) }
                         return@launch
                     }
                     val ok = LanPrinter(ip = ip, port = prefs.printerPort).ping()
+                    val target = "$ip:${prefs.printerPort}"
                     setState {
                         copy(
-                            errMsg = UiText.DynamicString(
-                                if (ok) "印表機連線成功 ✓ ($ip:${prefs.printerPort})"
-                                else "印表機連線失敗 ✗ ($ip:${prefs.printerPort})"
+                            errMsg = UiText.StringResource(
+                                if (ok) R.string.printer_connect_success
+                                else R.string.printer_connect_failed,
+                                arrayOf(target)
                             )
                         )
                     }

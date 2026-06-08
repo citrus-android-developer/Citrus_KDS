@@ -194,7 +194,7 @@ private fun ConnectParams(
                 Text(text = "Server URL", fontSize = 14.sp, color = ColorBlue)
                 TextInputField(
                     textFieldValue = state.serverUrlState,
-                    placeholder = "https://global.citrus.tw/CompassKDS/",
+                    placeholder = "https://<host>/CompassKDS/",
                     keyboardType = KeyboardType.Uri,
                     imeAction = ImeAction.Next,
                     enabled = true,

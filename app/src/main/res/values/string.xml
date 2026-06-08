@@ -33,6 +33,11 @@
     <string name="json_serialization_error">Json parsed error</string>
     <string name="server_error">Server error occur</string>
     <string name="connection_error">Connect error, please check the Pos IP</string>
+    <string name="server_url_not_set">Server URL not set, please fill it in Settings</string>
+    <string name="printer_ip_required">Please enter the printer IP first</string>
+    <string name="printer_connect_success">Printer connected ✓ (%1$s)</string>
+    <string name="printer_connect_failed">Printer connection failed ✗ (%1$s)</string>
+    <string name="download_failed">Download failed</string>
     <string name="unknown_error">Unknown error occur</string>
     <string name="no_result">No matching search results</string>
     <string name="please_select_type">Please select an item category</string>
