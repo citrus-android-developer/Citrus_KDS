@@ -175,7 +175,7 @@ fun StockItem(
                 // Wastage 標籤
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ic_delete),
+                        painter = painterResource(id = R.drawable.ic_trash),
                         contentDescription = null,
                         tint = StockRed,
                         modifier = Modifier.size(18.dp),
