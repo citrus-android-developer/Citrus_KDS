@@ -14,7 +14,7 @@ data class Order(
     var serviceType: String,
     @Json(name = "Status")
     var status: String,
-    @Json(name = "Note")
+    @Json(name = "OrderNote")
     var note: String? = null,
     @Json(ignore = true)
     var isVisible: Boolean = true,
@@ -67,6 +67,18 @@ val Order.isAddon: Boolean
 
 /** 加點時要升級/列印的新增品項（未接 j/J） */
 val Order.addonItems: List<Detail> get() = detail.filter { it.isPending }
+
+/**
+ * 震動器號碼（取餐呼叫器）。後端 OrderNote 格式為「<號碼>\」（固定尾綴一個反斜線），
+ * 沒設號碼時為空字串或單一「\」。去掉尾綴後空白即視為無號碼（回 null，卡片不顯示）。
+ */
+val Order.buzzerNo: String? get() = note?.removeSuffix("\\")?.trim()?.ifBlank { null }
+
+/**
+ * 套餐附餐（middleDetail）顯示行：一律「- {數量} x {名稱}」。
+ * 與主項那行格式一致，避免附餐 Qty>1 被當成 1 份漏做（見 ISSUE-附餐顯示缺陷 缺陷1）。
+ */
+fun middleItemLine(qty: Int, name: String): String = "- $qty x $name"
 
 /**
  * 卡片顯示用派生狀態：有任何未接(j)→J(新單)；否則有 W→W(製作中)；否則有 O→O(待取)；

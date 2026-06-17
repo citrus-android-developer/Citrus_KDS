@@ -27,10 +27,12 @@ import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Detail
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.additionDisplay
+import com.citrus.citruskds.commonData.vo.buzzerNo
 import com.citrus.citruskds.commonData.vo.displayStatus
 import com.citrus.citruskds.commonData.vo.flavorDisplay
 import com.citrus.citruskds.commonData.vo.isComboMain
 import com.citrus.citruskds.commonData.vo.isSideDish
+import com.citrus.citruskds.commonData.vo.middleItemLine
 import com.citrus.citruskds.commonData.vo.nameDisplay
 import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.presentation.CentralContract
@@ -106,7 +108,7 @@ fun OrderItem(
         ) {
             val no = order.orderNo
             val shortNo = no.substring(0, 3) + "-" + no.takeLast(5)
-            val pager = if (order.note.isNullOrBlank()) "" else " (${order.note})"
+            val pager = order.buzzerNo?.let { " ($it)" } ?: ""
             Text(
                 text = stringResource(id = R.string.no) + shortNo + pager,
                 color = ColorBlue,
@@ -183,7 +185,7 @@ fun OneLineItemInfo(
             //回圈方式產生text呈現ename
             for (element in middleList) {
                 Text(
-                    text = "- " + element.displayName(),
+                    text = middleItemLine(element.qty, element.displayName()),
                     color = ColorBlue,
                     modifier = Modifier
                         .padding(start = 20.dp, top = 10.dp)
