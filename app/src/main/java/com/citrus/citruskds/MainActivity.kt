@@ -358,6 +358,7 @@ class MainActivity : ComponentActivity() {
                             updateAsk.value = false
                         },
                         finish = {
+                            updateAsk.value = false   // 點 Download 即關閉版本輸入框（否則卡前景）
                             homeViewModel.setEvent(CentralContract.Event.IntentToUpdateVersion(it))
                         },
                         onCancel = {
