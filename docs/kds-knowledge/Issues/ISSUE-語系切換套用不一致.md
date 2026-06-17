@@ -4,7 +4,11 @@ status: done
 priority: P1
 created: 2026-06-04
 updated: 2026-06-04
-related: "[[設定頁]], [[KdsScreen容器]], [[訂單卡片元件]], [[Prefs偏好設定]]"
+related:
+  - "[[設定頁]]"
+  - "[[KdsScreen容器]]"
+  - "[[訂單卡片元件]]"
+  - "[[Prefs偏好設定]]"
 summary: |-
   FLAG:DECISION,ROOTCAUSE | 語系切換有時沒套用/錯亂
   KEY:舊作法用已棄用 updateConfiguration 竄改 resources(不通知 Compose)+SettingPage alpha hack 局部硬刷;靜態字串(stringResource)與品項名稱(prefs.language 直讀)兩套來源更新時機不同→錯亂

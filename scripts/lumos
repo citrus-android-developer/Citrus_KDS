@@ -1,0 +1,2755 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Lumos — 知識圖譜的控制台(graph-as-contract control plane)
+
+每一次全 AI 迭代是一條線,Lumos 把它織進「已理解的布」:巡檢 / 寫入 / 強制 / 視覺化。
+self-contained,無 Obsidian app / obsidian CLI 依賴,CI 可跑。
+設計與驗收標準: docs/<project>-knowledge/Projects/lumos_計劃.md
+
+子命令:
+  doctor      圖譜健康巡檢(四檢查 + 同名守衛 + frontmatter lint)
+  links       某筆記連出去的節點
+  backlinks   連到某筆記的節點
+  map         鄰域樹狀展開(--depth)
+  context     節點 + 鄰居 summary 壓縮索引(MemPalace closet 具象化)
+  decisions   讀取 ADR 決策(單篇,或 --superseded 全 vault 掃被推翻決策)
+  stale       status=stale 的驗證;--match 掃 valid_under/revalidate_when 命中條件
+  recent      最近 N 天修改的筆記
+  stats       資料夾統計
+  export      輸出 mermaid / dot 圖
+
+解析範圍(對齊 Obsidian 行為與 skill 鐵則):
+  - body 的 [[wikilink]],排除 fenced code block 與 inline code(Obsidian 不索引)
+  - frontmatter: 整個值恰為一個 wikilink 才索引(散文中夾帶的 [[..]] 不算;
+    2026-06-13 並跑首日 parity diff 修正)
+  - block scalar(summary: |- 等)內的 [[..]] 不算連結(鐵則 2)
+  - 連結解析: 路徑優先,fallback basename,大小寫不敏感,NFC 正規化
+"""
+import argparse
+import re
+import sys
+import time
+import unicodedata
+from collections import defaultdict
+from pathlib import Path
+
+FENCE_RE = re.compile(r"^```.*?^```", re.S | re.M)
+INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+WIKILINK_RE = re.compile(r"\[\[([^\[\]]+?)\]\]")
+DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+TOP_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):\s*(.*)$")
+LIST_ITEM_RE = re.compile(r"^\s+-\s+(.*)$")
+QUOTED_DATE_RE = re.compile(
+    r'^\s*(?:-\s+)?(?:date|created|updated|decided|ended):\s*"\d{4}-\d{2}-\d{2}"')
+RULE3_RE = re.compile(r"^\s+-\s+\w+: [^\"'|>\s][^\"']*: \S")  # 未引號值含 ": "
+
+
+def nfc(s):
+    return unicodedata.normalize("NFC", s)
+
+
+def strip_quotes(s):
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+        return s[1:-1]
+    return s
+
+
+def link_target(s):
+    """從 wikilink 字串/list 項抽**完整 target**(去 [[]]、alias、heading、引號;**保留路徑**)。
+    `[[Verification/X|y]]` → `Verification/X`。寫側 dedup 用它做精確比對:
+    既修子字串誤判(A vs A_v2 不同),又不像 basename-only 把跨資料夾 Systems/X vs
+    Verification/X 誤判相同(2026-06-13 第二輪審計 NEW-A)。"""
+    t = strip_quotes(str(s).strip())
+    t = t.replace("[[", "").replace("]]", "")
+    t = t.split("|")[0].split("#")[0].strip()
+    if t.lower().endswith(".md"):
+        t = t[:-3]
+    return nfc(t)
+
+
+def split_frontmatter(text):
+    """回傳 (fm_lines or None, body)"""
+    if not text.startswith("---"):
+        return None, text
+    lines = text.split("\n")
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return lines[1:i], "\n".join(lines[i + 1:])
+    return None, text
+
+
+def parse_frontmatter(fm_lines):
+    """極簡 parser(本 vault 慣例範圍): top-level 純量 + 字串 list + block scalar 內文。
+    回傳 (fields, block_keys, lint)
+      fields: dict[key] = str | list[str];block scalar 的 key 也存內文(供 context 用)
+      block_keys: block scalar 的 key 集合(其值內的 [[..]] 不得索引,鐵則 2)
+      lint: 鐵則指紋發現
+    """
+    fields, block_keys, lint = {}, set(), []
+    seen = set()
+    i, n = 0, len(fm_lines)
+    while i < n:
+        line = fm_lines[i]
+        m = TOP_KEY_RE.match(line)
+        if not m:
+            i += 1
+            continue
+        key, val = m.group(1), m.group(2).strip()
+        if key in seen:
+            lint.append(f"鐵則4 同層重複鍵: {key}")
+        seen.add(key)
+        if val in ("|", "|-", ">", ">-"):
+            block = []
+            i += 1
+            while i < n and (fm_lines[i].startswith("  ") or not fm_lines[i].strip()):
+                if fm_lines[i].strip():
+                    block.append(fm_lines[i].strip())
+                i += 1
+            fields[key] = "\n".join(block)
+            block_keys.add(key)
+            continue
+        if val == "":
+            items = []
+            i += 1
+            while i < n:
+                l2 = fm_lines[i]
+                if not l2.strip():
+                    i += 1
+                    continue
+                if not l2.startswith(" "):
+                    break
+                ms = LIST_ITEM_RE.match(l2)
+                if ms:
+                    item = strip_quotes(ms.group(1).strip())
+                    items.append(item)
+                    if "]], [[" in item or "]],[[" in item:
+                        lint.append(f"鐵則1 單字串多 wikilink: {key} 項 → ghost 節點風險")
+                if RULE3_RE.match(l2):
+                    lint.append(f"鐵則3 未引號值含「: 」: {l2.strip()[:60]}")
+                i += 1
+            fields[key] = items
+            continue
+        sval = strip_quotes(val)
+        if sval == "[]":  # 行內空列表(YAML flow style)
+            fields[key] = []
+            i += 1
+            continue
+        fields[key] = sval
+        if "]], [[" in sval or "]],[[" in sval:
+            lint.append(f"鐵則1 單字串多 wikilink: {key} → ghost 節點風險")
+        i += 1
+    for line in fm_lines:
+        if QUOTED_DATE_RE.match(line):
+            lint.append(f"污染指紋 日期加引號(property 型別損傷): {line.strip()}")
+    return fields, block_keys, lint
+
+
+def extract_targets(text):
+    out = []
+    for raw in WIKILINK_RE.findall(text):
+        t = raw.split("|")[0].split("#")[0].strip()
+        if t:
+            out.append(nfc(t))
+    return out
+
+
+class Note:
+    __slots__ = ("rel", "stem", "fields", "block_keys", "fm_lines",
+                 "targets", "lint", "mtime")
+
+
+def load_vault(vault: Path):
+    notes = {}
+    for p in sorted(vault.rglob("*.md")):
+        rel = nfc(p.relative_to(vault).as_posix())
+        n = Note()
+        n.rel = rel
+        n.stem = nfc(p.stem)
+        try:
+            n.mtime = p.stat().st_mtime
+            text = p.read_text(encoding="utf-8-sig")  # -sig: BOM 檔也偵測得到 frontmatter
+        except Exception as e:
+            n.fields, n.block_keys, n.fm_lines = {}, set(), []
+            n.targets, n.lint, n.mtime = [], [f"讀檔失敗: {e}"], 0
+            notes[rel] = n
+            continue
+        fm_lines, body = split_frontmatter(text)
+        if fm_lines is not None:
+            fields, block_keys, lint = parse_frontmatter(fm_lines)
+        else:
+            fm_lines, fields, block_keys, lint = [], {}, set(), []
+        body_clean = INLINE_CODE_RE.sub("", FENCE_RE.sub("", body))
+        # frontmatter 連結規則(對齊 Obsidian): 整個值恰為一個 wikilink 才索引,
+        # 夾在散文中間的 [[..]] 不算;block scalar 整段排除(鐵則 2)
+        fm_targets = []
+        for key, v in fields.items():
+            if key in block_keys:
+                continue
+            for item in (v if isinstance(v, list) else [v]):
+                s = str(item).strip()
+                fm = re.fullmatch(r"\[\[([^\[\]]+?)\]\]", s)
+                if fm:
+                    t = fm.group(1).split("|")[0].split("#")[0].strip()
+                    if t:
+                        fm_targets.append(nfc(t))
+        n.fields = fields
+        n.block_keys = block_keys
+        n.fm_lines = fm_lines
+        n.targets = extract_targets(body_clean) + fm_targets
+        n.lint = lint
+        notes[rel] = n
+    return notes
+
+
+def build_index(notes):
+    by_stem = defaultdict(list)
+    for rel, n in notes.items():
+        by_stem[n.stem.lower()].append(rel)
+    return by_stem
+
+
+def make_resolver(notes, by_stem):
+    rels = set(notes)
+
+    def resolve(target):
+        t = target
+        if t.lower().endswith(".md"):
+            t = t[:-3]
+        if "/" in t:
+            cand = t + ".md"
+            if cand in rels:
+                return cand
+            t = t.rsplit("/", 1)[1]
+        hits = by_stem.get(t.lower())
+        if hits:
+            return hits[0]
+        return None
+
+    return resolve
+
+
+def as_list(v):
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return [str(x) for x in v]
+    return [str(v)]
+
+
+class Env:
+    def __init__(self, vault):
+        self.vault = vault
+        self.notes = load_vault(vault)
+        self.by_stem = build_index(self.notes)
+        self.resolve = make_resolver(self.notes, self.by_stem)
+        self._edges = None
+
+    @property
+    def edges(self):
+        if self._edges is None:
+            out_e, in_e = defaultdict(list), defaultdict(list)
+            for rel, n in self.notes.items():
+                seen = set()
+                for t in n.targets:
+                    d = self.resolve(t)
+                    if d and d != rel and d not in seen:
+                        seen.add(d)
+                        out_e[rel].append(d)
+                        in_e[d].append(rel)
+            self._edges = (out_e, in_e)
+        return self._edges
+
+    def find(self, arg):
+        """以 stem 或相對路徑找筆記,回傳 rel 或 None"""
+        a = nfc(arg.strip())
+        if a.lower().endswith(".md"):
+            a = a[:-3]
+        if "/" in a and (a + ".md") in self.notes:
+            return a + ".md"
+        hits = self.by_stem.get(a.rsplit("/", 1)[-1].lower())
+        if hits:
+            if len(hits) > 1:
+                print(f"⚠ 同名筆記 {len(hits)} 個,取第一個: {hits[0]}", file=sys.stderr)
+            return hits[0]
+        return None
+
+
+def first_line(s, width=72):
+    s = (s or "").strip().split("\n")[0]
+    return s if len(s) <= width else s[:width] + "…"
+
+
+def status_of(env, rel):
+    v = env.notes[rel].fields.get("status", "")
+    return v if isinstance(v, str) else ""
+
+
+# ═══════════════════════ doctor ═══════════════════════
+
+def _stem_hit(stem, text):
+    """stem 是否在 text 中作為「整詞」出現。ASCII stem 用詞界(re.ASCII,避 api 命中 pos_api_auth);
+    CJK 無詞界 → 子字串比對,靠呼叫端的前綴抑制處理重疊(點數 vs 點數商城)。"""
+    if stem.isascii():
+        return re.search(r"\b" + re.escape(stem) + r"\b", text, re.ASCII) is not None
+    return stem in text
+
+
+def _suggest_systems_for_orphan(env, rel, n):
+    """為 orphan Verification 推薦『最可能該掛哪個 Systems』(非 auto-fix,供人確認)。
+    線索強度:本篇正文連向 Systems(3)> 經 plan_refs 計劃連到(2)> feature 提到 stem(1)。
+    回傳 [(sys_rel, score, reason), ...] 依 (score, stem 長度) 降序(同分時更具體的 stem 優先)。"""
+    cands = {}   # sys_rel -> (score, reason)
+
+    def add(sys_rel, score, reason):
+        if sys_rel in env.notes and (sys_rel not in cands or score > cands[sys_rel][0]):
+            cands[sys_rel] = (score, reason)
+
+    for t in n.targets:                                  # 1) 本篇正文連向的 Systems
+        d = env.resolve(t)
+        if d and d.startswith("Systems/"):
+            add(d, 3, "本篇正文連向(verified_by 未同步 → 可 sync-verified-by)")
+    for pr in as_list(n.fields.get("plan_refs")):        # 2) plan_refs → 計劃 → 計劃連向 Systems
+        pd = env.resolve(link_target(pr))
+        if pd and pd in env.notes:
+            for t in env.notes[pd].targets:
+                d = env.resolve(t)
+                if d and d.startswith("Systems/"):
+                    add(d, 2, f"經 plan_refs [[{env.notes[pd].stem}]] 連到")
+    # 3) feature 提到某 Systems stem(只用人寫的 feature,不用自動檔名;整詞 + 前綴重疊抑制)
+    feat = " ".join(str(x) for x in as_list(n.fields.get("feature")))
+    if feat:
+        matched = [(sr, sn.stem) for sr, sn in env.notes.items()
+                   if sr.startswith("Systems/") and sn.stem and _stem_hit(sn.stem, feat)]
+        stems = [s for _, s in matched]
+        for sr, st in matched:
+            if any(st != o and st in o for o in stems):   # st 是另一命中 stem 的子字串 → 丟(留更具體者)
+                continue
+            add(sr, 1, f"feature 提到「{st}」")
+    return sorted(((s, sc, r) for s, (sc, r) in cands.items()),
+                  key=lambda x: (-x[1], -len(env.notes[x[0]].stem or "")))
+
+
+def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
+    C = {k: (v if color else "") for k, v in
+         dict(R="\033[31m", Y="\033[33m", G="\033[32m", B="\033[1m", X="\033[0m").items()}
+    notes, by_stem, resolve = env.notes, env.by_stem, env.resolve
+    print(f"{C['B']}lumos doctor{C['X']} — vault: {C['B']}{env.vault}{C['X']} (self-contained, no Obsidian)")
+    print()
+    issues = 0
+
+    def section(idx, title):
+        print(f"{C['B']}[{idx}]{C['X']} {title}")
+
+    def ok(msg):
+        print(f"  {C['G']}✓{C['X']} {msg}")
+
+    def warn(lines, head, advice=None):
+        nonlocal issues
+        print(f"  {C['Y']}⚠{C['X']} {head}")
+        for l in lines:
+            print(f"      • {l}")
+        if advice:
+            print(f"  {C['B']}建議動作{C['X']}: {advice}")
+        issues += len(lines)
+
+    collisions = {s: rs for s, rs in by_stem.items() if len(rs) > 1}
+
+    incoming = defaultdict(int)
+    unresolved = set()
+    for rel, n in notes.items():
+        for t in n.targets:
+            dest = resolve(t)
+            if dest is None:
+                unresolved.add(t)
+            elif dest != rel:
+                incoming[dest] += 1
+
+    section("1/4", "Verification orphans (沒掛進任何 Systems.verified_by / 無 incoming link)")
+    orphans = [rel for rel in notes
+               if rel.startswith("Verification/") and incoming[rel] == 0]
+    if not orphans:
+        ok("沒有 Verification orphan")
+    elif suggest:
+        print(f"  {C['Y']}⚠{C['X']} 發現 {len(orphans)} 個 Verification 沒任何 incoming link(附推薦掛載 Systems):")
+        for o in sorted(orphans):
+            print(f"      • {o}")
+            sug = _suggest_systems_for_orphan(env, o, notes[o])
+            if not sug:
+                print("          ↳ (feature/plan_refs/連結皆無線索 → 人工判斷)")
+            for sys_rel, _sc, reason in sug[:3]:
+                print(f"          ↳ 推薦 {sys_rel}  [{reason}]")
+            if len(sug) > 3:
+                print(f"          ↳ (另有 {len(sug) - 3} 個較弱線索略過)")
+        issues += len(orphans)
+        print(f"  {C['B']}建議動作{C['X']}: 確認後 `lumos append <Systems> verified_by \"[[<本篇>]]\"`"
+              ";若推薦理由是「本篇正文連向」(verified_by 漏寫)→ `lumos sync-verified-by` 可批次補。")
+    else:
+        warn(sorted(orphans), f"發現 {len(orphans)} 個 Verification 沒任何 incoming link:",
+             "找到它驗證的 Systems 並補進 verified_by(`--suggest` 看推薦掛載目標)")
+    print()
+
+    section("2/4", "Unresolved wikilinks (破連結)")
+    if not unresolved:
+        ok("沒有 unresolved wikilink")
+    else:
+        warn([f"[[{t}]]" for t in sorted(unresolved)],
+             f"發現 {len(unresolved)} 個 unresolved wikilink targets:",
+             "建立目標筆記 / 修正打錯的名字 / 移除過時引用")
+    print()
+
+    section("3/4", "verified_by 雙向同步 (Verification → Systems 漏寫)")
+    # 以 resolve 到的 rel 比對:path 式 [[Verification/X]] 與 basename [[X]] 等價(同篇),
+    # 但 [[Projects/X]] 與 Verification/X 不同篇(第二輪審計 NEW-B)。存 Verification 的 rel。
+    expected = defaultdict(set)
+    for rel, n in notes.items():
+        if not rel.startswith("Verification/"):
+            continue
+        for t in n.targets:
+            dest = resolve(t)
+            if dest and dest.startswith("Systems/"):
+                expected[dest].add(rel)
+    missing = []
+    for sys_rel, verif_rels in sorted(expected.items()):
+        actual_rels = {resolve(link_target(a))
+                       for a in as_list(notes[sys_rel].fields.get("verified_by"))}
+        actual_rels.discard(None)
+        missed = sorted(notes[v].stem for v in verif_rels if v not in actual_rels)
+        if missed:
+            missing.append(f"{sys_rel} 漏: {' | '.join(missed)}")
+    if not missing:
+        ok("所有 Verification 都已掛進對應 Systems 的 verified_by")
+    else:
+        warn(missing, f"發現 {len(missing)} 個 Systems 的 verified_by 漏寫:",
+             "對每個 Systems 補上漏寫的 verified_by")
+    print()
+
+    section("4/4", "plan_refs 意圖鏈 (計劃結案後的迭代驗證,計劃有沒有跟上)")
+    chain = []
+    for rel, n in notes.items():
+        if not rel.startswith("Verification/"):
+            continue
+        refs = as_list(n.fields.get("plan_refs"))
+        if not refs:
+            continue
+        m = DATE_PREFIX_RE.match(n.stem)
+        v_date = m.group(1) if m else None
+        for r in refs:
+            name = r.replace("[[", "").replace("]]", "").split("|")[0].strip()
+            dest = resolve(nfc(name))
+            if dest is None:
+                chain.append(f"{n.stem} 的 plan_refs 斷鏈: {name}")
+                continue
+            pf = notes[dest].fields
+            status = str(pf.get("status", ""))
+            u = pf.get("updated", "")
+            u = (u[0] if u else "") if isinstance(u, list) else u  # updated 萬一是 list 取首項(GAP-2)
+            p_updated = str(u)[:10] or None
+            if status in ("done", "superseded") and v_date and p_updated and v_date > p_updated:
+                chain.append(f"{notes[dest].stem} (status:{status}, updated:{p_updated}) "
+                             f"結案後有較新驗證: {n.stem}")
+    if not chain:
+        ok("意圖鏈完整 (無結案計劃漏接迭代驗證、無 plan_refs 斷鏈)")
+    else:
+        warn(sorted(chain), f"發現 {len(chain)} 個意圖鏈問題:",
+             "結案計劃有較新驗證 → 更新計劃本體; 斷鏈 → 修正 plan_refs 路徑")
+    print()
+
+    section("G", "同名 basename 守衛 (連結解析歧義)")
+    if not collisions:
+        ok("無同名筆記,basename 解析無歧義")
+    else:
+        warn([f"{s}: {' , '.join(sorted(rs))}" for s, rs in sorted(collisions.items())],
+             f"發現 {len(collisions)} 組同名 basename — 不帶路徑的 [[連結]] 解析有歧義:",
+             "改名其一,或全 vault 引用改用完整路徑形態")
+    print()
+
+    section("L", "frontmatter lint (鐵則 1/3/4 指紋 + 污染指紋; python 版加值)")
+    lint_lines = []
+    for rel, n in sorted(notes.items()):
+        for l in n.lint:
+            lint_lines.append(f"{rel}: {l}")
+    if not lint_lines:
+        ok("無鐵則指紋、無污染指紋")
+    else:
+        warn(lint_lines, f"發現 {len(lint_lines)} 個 frontmatter 指紋:",
+             "鐵則修法見 lumos-project-notes skill; 污染指紋見 pre-commit Gate 1 指引")
+    print()
+
+    # Check C: core_refs 跨 repo 指針完整性(只在有 core_refs 時跑)
+    import os
+    section("C", "core_refs 跨 repo 指針 (指向核心知識 repo 的檔案是否存在)")
+    repo_root = None
+    for p in env.vault.parents:
+        if p.name == "docs":
+            repo_root = p.parent
+            break
+    core_env = os.environ.get("CORE_KNOWLEDGE_ROOT")
+    core_refs_all = []
+    for rel, n in sorted(notes.items()):
+        for ref in as_list(n.fields.get("core_refs")):
+            r = ref.strip()
+            if r:
+                core_refs_all.append((rel, r))
+    # 核心 repo 根目錄: CORE_KNOWLEDGE_ROOT env 優先,否則 sibling 慣例(<repo>.parent/<repo-dir-name>)
+    core_base = None
+    if core_env:
+        core_base = Path(core_env)
+    elif repo_root is not None and core_refs_all:
+        first_seg = core_refs_all[0][1].split("/", 1)[0]
+        core_base = repo_root.parent / first_seg
+    if not core_refs_all:
+        ok("無 core_refs 指針")
+    elif core_base is None or not core_base.is_dir():
+        # 核心 repo 不在此環境(如 CI 未 checkout 跨 repo)→ 跳過,不誤判懸空
+        print(f"  {C['Y']}—{C['X']} 核心 repo 不在此環境(CI 未 checkout?),跳過跨 repo 檢查"
+              f"(本機設 CORE_KNOWLEDGE_ROOT 或置核心 repo 為 sibling 可驗)")
+    else:
+        dangling = []
+        for rel, ref in core_refs_all:
+            if core_env:
+                parts = ref.split("/", 1)
+                rest = parts[1] if len(parts) == 2 else ref
+                target = core_base / rest
+            else:
+                target = repo_root.parent / ref
+            if not target.exists():
+                dangling.append(f"{rel} → {ref}")
+        if not dangling:
+            ok(f"所有 core_refs 指針有效 ({len(core_refs_all)} 條)")
+        else:
+            warn(dangling, f"發現 {len(dangling)} 條懸空 core_refs (指向核心 repo 不存在的檔):",
+                 "核心 repo 改名/移檔 → 修專案 core_refs 路徑(指針紀律不留快照,懸空=權威失聯)")
+    print()
+
+    # Check T: ★INVARIANT★ 合約測試綁定(載重宣稱必須認領存在的可執行證據)
+    # 「形式 → 真」缺的那一環:doctor 不執行測試,但強制每條 ★INVARIANT★ 指向一個
+    # 真實存在的測試 → 杜絕「裸合約」(宣稱無證據)與「懸空 test_ref」(綁了不存在的測試)。
+    section("T", "★INVARIANT★ 合約測試綁定 (載重宣稱有沒有綁可執行證據)")
+    inv_all = []
+    for rel, n in sorted(notes.items()):
+        invs, _ = extract_contracts(n)
+        for inv in invs:
+            inv_all.append((rel, inv))
+    if not inv_all:
+        ok("無 ★INVARIANT★ 合約 (無載重宣稱需綁測試)")
+    else:
+        naked, bound = [], []
+        for rel, inv in inv_all:
+            clean, refs = strip_test_refs(inv)
+            (bound if refs else naked).append((rel, clean, refs))
+        dangling, fake = [], []
+        if bound:
+            if repo_root is None:
+                print(f"  {C['Y']}—{C['X']} 無法定位 repo root,跳過 test_ref 存在性檢查(裸合約仍檢)")
+            else:
+                _prof = load_test_profile(repo_root)
+                _attr = _prof["attr_hint"]
+                test_methods = discover_test_methods(repo_root, _prof)
+                hay = build_code_haystack(repo_root)
+                for rel, clean, refs in bound:
+                    for name in refs:
+                        if name in test_methods:
+                            continue  # 真實測試方法(依 profile 認 attr)
+                        elif name in hay:
+                            # 出現在程式碼但不是測試方法 → 偽證據(子字串巧合/被改名/拼錯屬性)
+                            fake.append(f"{rel}: [test:{name}] 在程式碼出現,但不是 {_attr} 測試方法")
+                        else:
+                            dangling.append(f"{rel}: [test:{name}] 在程式碼中找不到")
+        if not naked and not dangling and not fake:
+            ok(f"{len(bound)} 條 ★INVARIANT★ 都綁了真實可執行測試方法 (0 裸合約 / 0 偽證據 / 0 懸空)")
+        if naked:
+            warn([f"{r}: {first_line(c, 70)}" for r, c, _ in naked],
+                 f"發現 {len(naked)} 條裸 ★INVARIANT★ (載重宣稱沒綁測試 → 無法機械驗真):",
+                 "在 invariant 行尾加 [test:測試名],並寫對應測試")
+        if fake:
+            warn(fake, f"發現 {len(fake)} 條偽證據 test_ref (綁的名字不是真測試方法 → 無法執行):",
+                 f"確認 [test:] 名字 = 某個 {_attr} 方法名(別綁到散文/工具方法/拼錯)")
+        if dangling:
+            warn(dangling, f"發現 {len(dangling)} 條懸空 test_ref (綁的測試在程式碼中不存在):",
+                 "建立該測試,或修正 [test:] 名稱")
+    print()
+
+    print(f"{C['B']}─────────────────────────────────{C['X']}")
+    if issues == 0:
+        print(f"{C['G']}{C['B']}✓ 圖譜健康{C['X']} — 0 issues ({len(notes)} 篇)")
+        return 0
+    print(f"{C['Y']}{C['B']}⚠ 發現 {issues} 個 issue{C['X']} ({len(notes)} 篇)")
+    return 1 if strict else 0
+
+
+# ═══════════════════════ 階段二: 讀側 ═══════════════════════
+
+SYMBOL_RE = re.compile(r"^(KEY|FLOW|DEP|TEST|AUTH|FLAG|DECISION|VERIFY|CORE):")
+FM_KEY_RE = re.compile(r"^\s*([A-Za-z_][\w-]*):")
+
+
+def _search_region(lineno, line, fm_end):
+    """標記命中行所在的結構區域 — 讓「合約行 vs 散文」一眼可辨(尊重標籤哲學)。"""
+    s = line.strip()
+    if "★INVARIANT★" in s:
+        return "★INVARIANT★"
+    if "★DEBT★" in s:
+        return "★DEBT★"
+    if lineno <= fm_end:
+        m = SYMBOL_RE.match(s)
+        if m:
+            return m.group(1)            # summary 符號行: KEY/FLOW/DEP...
+        mk = FM_KEY_RE.match(line)
+        if mk:
+            return f"fm:{mk.group(1)}"    # frontmatter 欄位
+        return "fm"
+    return "body"
+
+
+def cmd_search(env, term, path_prefix=None, regex=False, files_only=False, include_code=False):
+    """全文搜尋(frontmatter + body)。預設大小寫不敏感 substring;--regex 用正則。
+    預設**排除 fenced code 區塊 + inline code**(對齊 doctor 連結抽取的慣例,--code 才含);
+    context 標記命中區域(★INVARIANT★/KEY/fm:欄位/body)。職責=自由文字;結構化查詢走
+    contracts/decisions/stale/doctor。取代 obsidian search(2026-06-13)。"""
+    if regex:
+        try:
+            pat = re.compile(term, re.IGNORECASE)
+        except re.error as e:
+            print(f"ERROR: 正則無效: {e}", file=sys.stderr)
+            return 2
+        matches = lambda s: pat.search(s) is not None
+    else:
+        needle = nfc(term).lower()
+        matches = lambda s: needle in nfc(s).lower()
+    total_files = total_hits = 0
+    for rel in sorted(env.notes):
+        if path_prefix and not rel.startswith(path_prefix):
+            continue
+        try:
+            text = (env.vault / rel).read_text(encoding="utf-8-sig")
+        except Exception:
+            continue
+        lines = text.split("\n")
+        fm_end = 0
+        if lines and lines[0].strip() == "---":
+            for i in range(1, len(lines)):
+                if lines[i].strip() == "---":
+                    fm_end = i + 1
+                    break
+        hits, in_fence = [], False
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith("```"):       # fenced code 邊界
+                in_fence = not in_fence
+                continue
+            if in_fence and not include_code:
+                continue
+            probe = ln if include_code else INLINE_CODE_RE.sub("", ln)
+            if matches(probe):
+                hits.append((i + 1, ln))
+        if not hits:
+            continue
+        total_files += 1
+        total_hits += len(hits)
+        if files_only:
+            print(f"{rel} ({len(hits)})")
+            continue
+        print(f"{rel}")
+        for lineno, ln in hits[:8]:
+            s = ln.strip()
+            tag = _search_region(lineno, ln, fm_end)
+            disp = s if len(s) <= 90 else s[:90] + "…"
+            print(f"  {lineno} [{tag}]: {disp}")
+        if len(hits) > 8:
+            print(f"  … 還有 {len(hits) - 8} 處")
+    suffix = f"(限 {path_prefix})" if path_prefix else ""
+    if not include_code:
+        suffix += " [已排除 code block,--code 可含]"
+    print(f"\n{total_hits} 處 / {total_files} 篇{suffix}")
+    return 0
+
+
+def cmd_links(env, rel, reverse=False):
+    out_e, in_e = env.edges
+    rows = (in_e if reverse else out_e).get(rel, [])
+    arrow = "←" if reverse else "→"
+    print(f"{rel} {arrow} {len(rows)} 個節點:")
+    for d in sorted(rows):
+        print(f"  • {d} [{status_of(env, d)}]")
+    return 0
+
+
+def cmd_map(env, rel, depth):
+    out_e, _ = env.edges
+    seen = {rel}
+
+    def walk(cur, d, prefix):
+        if d > depth:
+            return
+        children = [c for c in sorted(out_e.get(cur, []))]
+        for i, c in enumerate(children):
+            tail = "└─" if i == len(children) - 1 else "├─"
+            mark = " (↺)" if c in seen else ""
+            print(f"{prefix}{tail} {c} [{status_of(env, c)}]{mark}")
+            if c not in seen:
+                seen.add(c)
+                walk(c, d + 1, prefix + ("   " if i == len(children) - 1 else "│  "))
+
+    print(f"{rel} [{status_of(env, rel)}]  (depth={depth}, ↺=已出現過)")
+    walk(rel, 1, "")
+    return 0
+
+
+# 標準格式: KEY 行前綴 ★INVARIANT★ / ★DEBT★(可帶 (日期) 前綴)。
+# 錨定 KEY 行起始 → 排除「散文中提到標記」的誤報(如方法論文件講解標記用法)。
+INVARIANT_RE = re.compile(r"^KEY:\s*(?:\([^)]*\)\s*)?★INVARIANT★\s*(.*)")
+DEBT_RE = re.compile(r"^KEY:\s*(?:\([^)]*\)\s*)?★DEBT★\s*(.*)")
+
+
+def extract_contracts(note):
+    """從 summary block 的 KEY 行抽標準格式 ★INVARIANT★ / ★DEBT★。回傳 (invariants, debts)。
+    只認 KEY 行前綴(標準格式),散文中提及不算 — 否則方法論文件會誤報。"""
+    summ = note.fields.get("summary")
+    inv, debt = [], []
+    if isinstance(summ, str):
+        for line in summ.split("\n"):
+            line = line.strip()
+            mi = INVARIANT_RE.match(line)
+            if mi:
+                inv.append(mi.group(1).strip())
+            md = DEBT_RE.match(line)
+            if md:
+                debt.append(md.group(1).strip())
+    return inv, debt
+
+
+TEST_REF_RE = re.compile(r"\[test:\s*([^\]]+)\]")
+# 真實可執行測試方法:xUnit 屬性([Fact]/[Theory]/[SkippableFact],含 (Skip=..) 變體)
+# + 可選後續屬性(InlineData/MemberData/Trait)→ 存取修飾 → 可選 async → 回傳型別 → 方法名。
+# B6 審計:Check T 不能只做子字串比對(會把「散文裡剛好提到的字」當證據);必須認到真方法。
+TEST_METHOD_RE = re.compile(
+    r"\[(?:Fact|Theory|SkippableFact)\b[^\]]*\]"
+    r"(?:\s*\[[^\]]*\])*"
+    r"\s*(?:public|internal|protected|private)\s+(?:async\s+)?"
+    r"[\w.<>,\[\]\?]+\s+"
+    r"([A-Za-z_]\w*)\s*\(",
+    re.S)
+CODE_EXTS_T = {".cs", ".py", ".js", ".ts", ".tsx", ".jsx", ".vue",
+               ".sql", ".kt", ".java", ".go", ".rs"}
+CODE_SKIP_DIRS = {".git", "node_modules", "bin", "obj", "dist", "build",
+                  "__pycache__", "publish", "vendor", ".vs", ".idea"}
+
+# Kotlin/JUnit 測試方法:@Test/@ParameterizedTest 等註解 → (中間不跨 `{`,即不越過方法體)
+# → fun 方法名(允許反引號帶空白的 Kotlin 測試名)。去註解後比對(同 C#)。
+KOTLIN_TEST_RE = re.compile(
+    r"@(?:Test|ParameterizedTest|RepeatedTest)\b[^{]*?\bfun\s+(`[^`]+`|[A-Za-z_]\w*)\s*\(",
+    re.S)
+
+# ── 測試棧 profile(語言可插拔;P5 — Android/Kotlin 等也能用 guard + Check T)──
+# 每個 profile:exts(discover 掃哪些副檔名)/ method_re(group(1)=方法名)/
+# scaffold_ext(產 stub 副檔名)/ dir_mode(suffix=頂層目錄 endswith / rglob=遞迴找目錄名)/
+# dirs[gtype]=(include, exclude)。預設 csharp-xunit(向後相容)。
+TEST_PROFILES = {
+    "csharp-xunit": {
+        "exts": {".cs"}, "method_re": TEST_METHOD_RE, "scaffold_ext": ".cs",
+        "dir_mode": "suffix", "rglob_under": None,
+        "attr_hint": "[Fact]/[Theory]/[SkippableFact]", "fail_hint": "Assert.Fail",
+        "dirs": {"pure": (["Tests"], ["IntegrationTests"]),
+                 "behavioral": (["IntegrationTests"], []),
+                 "state": (["IntegrationTests"], [])},
+    },
+    "kotlin-junit": {
+        "exts": {".kt"}, "method_re": KOTLIN_TEST_RE, "scaffold_ext": ".kt",
+        "dir_mode": "rglob", "rglob_under": "src",   # 限 Gradle/Maven src/ 下,排除 docs/test 等
+        "attr_hint": "@Test/@ParameterizedTest/@RepeatedTest", "fail_hint": "fail()",
+        "dirs": {"pure": (["test"], []),
+                 "behavioral": (["androidTest", "test"], []),
+                 "state": (["androidTest", "test"], [])},
+    },
+}
+
+
+def load_test_profile(repo_root):
+    """讀 <repo>/.lumos/config.json 的 test_profile(預設 csharp-xunit;向後相容)。
+    支援欄位級 inline 覆蓋(exts/scaffold_ext/method_regex)當逃生口。"""
+    import json
+    prof = dict(TEST_PROFILES["csharp-xunit"])
+    cfg_path = repo_root / ".lumos" / "config.json"
+    if not cfg_path.exists():
+        return prof
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"⚠ .lumos/config.json 解析失敗,用 csharp-xunit 預設: {e}", file=sys.stderr)
+        return prof
+    name = cfg.get("test_profile") or "csharp-xunit"   # null/空字串 → 預設(F8)
+    if name in TEST_PROFILES:
+        prof = dict(TEST_PROFILES[name])
+    elif name != "csharp-xunit":
+        print(f"⚠ 未知 test_profile '{name}'(有: {', '.join(TEST_PROFILES)}),用 csharp-xunit",
+              file=sys.stderr)
+    ov = cfg.get("test")
+    if ov is not None and not isinstance(ov, dict):   # F1:test 非 dict → 忽略不 crash
+        print(f"⚠ config.json 的 test 欄位應為物件,忽略(收到 {type(ov).__name__})", file=sys.stderr)
+        ov = None
+    if isinstance(ov, dict):
+        if "exts" in ov:
+            raw = ov["exts"]
+            raw = [raw] if isinstance(raw, str) else raw   # F1:字串容錯為單元素
+            if isinstance(raw, list):
+                prof["exts"] = {e if e.startswith(".") else "." + e for e in raw}
+            else:
+                print("⚠ test.exts 應為陣列,忽略", file=sys.stderr)
+        if isinstance(ov.get("scaffold_ext"), str):
+            prof["scaffold_ext"] = ov["scaffold_ext"]
+        if "method_regex" in ov:
+            rx, err = _safe_user_regex(ov["method_regex"])   # F2:編譯 + ReDoS 探針
+            if rx is not None:
+                prof["method_re"] = rx
+            else:
+                print(f"⚠ test.method_regex 不採用({err}),沿用 profile 內建", file=sys.stderr)
+    return prof
+
+
+def _safe_user_regex(pattern):
+    """編譯使用者提供的 regex,並用【靜態】啟發式擋常見巢狀量詞 ReDoS。
+    關鍵:**絕不執行**該 regex 來探測 — 在 CPython 裡 catastrophic regex 持有 GIL,
+    用 thread/probe 探測反而會把整個 process 卡死(GIL 餓死主執行緒)。故只做模式檢查。
+    非窮舉(擋不到 alternation 型),擋得到 (a+)+ / (a*)+ / (a+)* 這類經典款。
+    回傳 (compiled, None) 或 (None, 原因)。"""
+    if not isinstance(pattern, str):
+        return None, "非字串"
+    # 巢狀量詞:帶量詞的群組整體又被量詞修飾(經典 catastrophic backtracking)
+    if re.search(r"\([^()]*[+*][^()]*\)\s*[+*?]", pattern) or \
+       re.search(r"\([^()]*\)\s*[+*]\s*[+*]", pattern):
+        return None, "疑似巢狀量詞 ReDoS(如 (a+)+);請改寫或用 profile 內建"
+    try:
+        return re.compile(pattern, re.S), None
+    except re.error as e:
+        return None, f"無效: {e}"
+
+
+def invariant_test_refs(inv_text):
+    """從 ★INVARIANT★ 文字抽 [test:A,B] 綁定的可執行測試名(可多個,逗號分隔)。無綁定回 []。"""
+    out = []
+    for m in TEST_REF_RE.findall(inv_text):
+        out.extend(t.strip() for t in m.split(",") if t.strip())
+    return out
+
+
+def strip_test_refs(inv_text):
+    """回傳 (去掉 [test:..] 標記的乾淨宣稱文字, 綁定測試名 list)。"""
+    return TEST_REF_RE.sub("", inv_text).strip(), invariant_test_refs(inv_text)
+
+
+def build_code_haystack(repo_root):
+    """讀 repo 內所有 code 檔串成大字串,供 ★INVARIANT★ 綁定的測試名做存在性檢查。
+    (閉環外接觸:doctor 不執行測試,只驗證『載重宣稱認領的證據真的存在於程式碼』)"""
+    import os
+    parts = []
+    for dp, dirs, files in os.walk(repo_root):
+        dirs[:] = [d for d in dirs if d not in CODE_SKIP_DIRS]
+        for f in files:
+            if Path(f).suffix.lower() in CODE_EXTS_T:
+                try:
+                    parts.append((Path(dp) / f).read_text(encoding="utf-8", errors="ignore"))
+                except Exception:
+                    pass
+    return "\n".join(parts)
+
+
+def discover_test_methods(repo_root, profile=None):
+    """掃 repo 內測試檔,回傳「真實測試方法名」集合(被測試框架註解標註者)。
+    測試棧 profile 決定掃哪些副檔名 + 用哪條方法 regex(預設 csharp-xunit;P5 語言可插拔)。
+    Check T 用此集合驗證 ★INVARIANT★ 綁定的是『可執行證據』而非散文裡的字面巧合(B6 審計)。"""
+    import os
+    profile = profile or load_test_profile(repo_root)
+    exts, mre = profile["exts"], profile["method_re"]
+    methods = set()
+    for dp, dirs, files in os.walk(repo_root):
+        dirs[:] = [d for d in dirs if d not in CODE_SKIP_DIRS]
+        for f in files:
+            if Path(f).suffix.lower() in exts:
+                try:
+                    txt = (Path(dp) / f).read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                # 先去註解:行尾 // 註解(如 [InlineData(..)] // 說明 / @Test // 備註)會打斷
+                # 「註解串→方法簽章」的連續比對,導致真測試被誤判偽證據。
+                txt = re.sub(r"//[^\n]*", "", txt)
+                txt = re.sub(r"/\*.*?\*/", "", txt, flags=re.S)
+                for m in mre.finditer(txt):
+                    methods.add(m.group(1).strip("`"))  # Kotlin 反引號測試名去引號
+    return methods
+
+
+def cmd_contracts(env, rel=None):
+    """合約登記簿: ★INVARIANT★(改=breaking) / ★DEBT★(可改)。
+    動某模組前先查它的硬合約 — Obsidian 做不到(子字串不在它的 graph 裡)。
+    ★INVARIANT★ 顯示綁定的測試(可執行證據);未綁=⚠(doctor Check T 會擋)。"""
+    targets = [rel] if rel else sorted(env.notes)
+    n_inv = n_debt = 0
+    for r in targets:
+        inv, debt = extract_contracts(env.notes[r])
+        if not inv and not debt:
+            continue
+        print(f"# {r}")
+        for x in inv:
+            clean, refs = strip_test_refs(x)
+            print(f"  ★INVARIANT★ {clean}")
+            print(f"      ↳ test: {', '.join(refs)}" if refs else "      ↳ ⚠ 未綁測試(無可執行證據)")
+            n_inv += 1
+        for x in debt:
+            print(f"  ★DEBT★ {x}")
+            n_debt += 1
+    if n_inv == 0 and n_debt == 0:
+        print("(無合約標記)" if rel else "(全 vault 無合約標記 — 用 ★INVARIANT★/★DEBT★ 前綴標 KEY 行)")
+    else:
+        print(f"\n合約 {n_inv} 條(改=breaking) | 技術債 {n_debt} 條(可改)")
+    return 0
+
+
+# ───────────── guard: 合約守衛 scaffold(對談驅動)─────────────
+# lumos 只做機械活:① 列出 ★INVARIANT★ 綁定狀態 ② 套範本產 stub(預設紅燈) ③ 把 [test:] 綁回 KEY 行(自驗)。
+# 「斷言本體」由 Claude 經對談向人確認意圖後填 — claim 的真來自人確認,不來自 code 反推
+# (反推=套套邏輯=Check T 在打的偽證據)。範本是技術棧專屬、放專案 .lumos/guard-templates/<type>.tmpl,
+# lumos 本體維持語言無關。
+GUARD_TYPES = ("pure", "behavioral", "state")
+GUARD_ICON = {"real": "✅ 已綁真方法", "dangling": "❌ 懸空(找不到方法)",
+              "fake": "⚠ 偽證據(非測試方法)", "naked": "❌ 裸合約(未綁)"}
+
+
+def _repo_root_from_env(env):
+    for p in env.vault.parents:
+        if p.name == "docs":
+            return p.parent
+    return env.vault.parent  # standalone vault root
+
+
+def classify_invariants(env):
+    """每條 ★INVARIANT★ 的綁定狀態:real / dangling / fake / naked。"""
+    repo_root = _repo_root_from_env(env)
+    methods = discover_test_methods(repo_root)
+    hay = build_code_haystack(repo_root)
+    rows = []
+    for rel in sorted(env.notes):
+        inv, _ = extract_contracts(env.notes[rel])
+        for x in inv:
+            clean, refs = strip_test_refs(x)
+            if not refs:
+                status = "naked"
+            elif any(r not in methods and r not in hay for r in refs):
+                status = "dangling"
+            elif any(r not in methods for r in refs):
+                status = "fake"
+            else:
+                status = "real"
+            rows.append({"node": rel, "text": clean, "refs": refs, "status": status})
+    return rows
+
+
+def cmd_guard_list(env, unbound_only=False):
+    rows = classify_invariants(env)
+    shown = 0
+    for r in rows:
+        if unbound_only and r["status"] == "real":
+            continue
+        shown += 1
+        print(f"{GUARD_ICON[r['status']]}  {r['node']}")
+        print(f"    {r['text'][:96]}")
+        print(f"    [test:{','.join(r['refs'])}]" if r["refs"] else "    (未綁)")
+    from collections import Counter
+    c = Counter(r["status"] for r in rows)
+    print(f"\n合約 {len(rows)} 條 — 真綁 {c['real']} / 懸空 {c['dangling']} / "
+          f"偽證據 {c['fake']} / 裸 {c['naked']}")
+    if unbound_only and shown == 0:
+        print("✓ 沒有未綁合約(全綁真方法)")
+    return 0
+
+
+IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _detect_test_dir(repo_root, gtype, profile=None):
+    """偵測測試專案目錄。由 profile 決定:
+    suffix 模式(C#)= 頂層目錄 endswith(pure 排除 IntegrationTests);
+    rglob 模式(Kotlin/Android)= 遞迴找目錄名(巢狀 src/test、多 module)。
+    多候選印警告取第一個(避免靜默寫錯)。找不到回 None → scaffold 要求 --out。"""
+    profile = profile or load_test_profile(repo_root)
+    inc, exc = profile["dirs"].get(gtype, ([], []))
+    if profile["dir_mode"] == "suffix":
+        hit = [d for d in sorted(repo_root.iterdir())
+               if d.is_dir() and any(d.name.endswith(p) for p in inc)
+               and not any(d.name.endswith(e) for e in exc)]
+    else:  # rglob:遞迴找目錄名(取第一個 include pattern 有命中者)
+        under = profile.get("rglob_under")
+        hit = []
+        for p in inc:
+            found = sorted(d for d in repo_root.rglob(p)
+                           if d.is_dir() and not (set(d.parts) & CODE_SKIP_DIRS)
+                           and (under is None or under in d.parts))  # F6:限 src/ 下
+            if found:
+                hit = found
+                break
+    if not hit:
+        return None
+    if len(hit) > 1:
+        names = [str(d.relative_to(repo_root)) for d in hit]
+        print(f"⚠ 偵測到多個測試目錄 {names},取 {names[0]};要寫別處用 --out 指定",
+              file=sys.stderr)
+    return hit[0]
+
+
+def _tautology_warn(claim, clean):
+    """claim 高度重述 invariant = 套套邏輯嫌疑(防帶風向)。字元三連袋 Jaccard,中英都適用。"""
+    def trigrams(s):
+        s = re.sub(r"\s+", "", s)
+        return {s[i:i+3] for i in range(max(0, len(s) - 2))}
+    a, b = trigrams(claim), trigrams(clean)
+    if not a or not b:
+        return
+    jac = len(a & b) / len(a | b)
+    norm_claim = re.sub(r"\s+", "", claim)
+    norm_clean = re.sub(r"\s+", "", clean)
+    if norm_claim and (norm_claim in norm_clean or norm_clean in norm_claim or jac >= 0.85):
+        print("⚠ claim 與 invariant 文字高度雷同(套套邏輯嫌疑)。claim 應是『向人確認過、"
+              "可驗的具體斷言』,不是重述合約本身——確認它來自意圖而非 code/合約 reword。",
+              file=sys.stderr)
+
+
+def cmd_guard_scaffold(env, node, invariant_substr, method, gtype, claim,
+                       out_dir=None, template=None, klass=None):
+    if gtype not in GUARD_TYPES:
+        print(f"ERROR: --type 須為 {'|'.join(GUARD_TYPES)}(收到 {gtype})", file=sys.stderr)
+        return 2
+    if not IDENT_RE.match(method):
+        print(f"ERROR: --method『{method}』非合法識別字(只允許字母/數字/底線,不可數字開頭)。"
+              f"\n  (Kotlin 反引號測試名含空白 → CLI 不支援,請手動編輯 .md 的 [test:] 與測試檔)",
+              file=sys.stderr)
+        return 2
+    if klass is not None and not IDENT_RE.match(klass):
+        print(f"ERROR: --class『{klass}』非合法識別字", file=sys.stderr)
+        return 2
+    rel = env.find(node)
+    if rel is None:
+        print(f"ERROR: 找不到節點 {node}", file=sys.stderr)
+        return 2
+    inv, _ = extract_contracts(env.notes[rel])
+    # 比對 invariant 語義本體(去掉 [test:..] 後綴),避免子字串誤命中既有測試名
+    matched = [x for x in inv if invariant_substr in strip_test_refs(x)[0]]
+    if not matched:
+        print(f"ERROR: {rel} 沒有含『{invariant_substr}』的 ★INVARIANT★(已排除 [test:] 後綴)",
+              file=sys.stderr)
+        return 2
+    if len(matched) > 1:
+        print(f"ERROR: 『{invariant_substr}』命中 {len(matched)} 條,請給更精確子字串", file=sys.stderr)
+        return 2
+    clean, _ = strip_test_refs(matched[0])
+    _tautology_warn(claim, clean)
+    repo_root = _repo_root_from_env(env)
+    profile = load_test_profile(repo_root)
+    tpl_path = Path(template) if template else \
+        (repo_root / ".lumos" / "guard-templates" / f"{gtype}.tmpl")
+    if not tpl_path.exists():
+        print(f"ERROR: 找不到範本 {tpl_path}\n  範本是技術棧專屬、放專案 "
+              f".lumos/guard-templates/<type>.tmpl;lumos 語言無關不內建。先建範本再 scaffold。",
+              file=sys.stderr)
+        return 2
+    klass = klass or (method + "Tests")  # 不複用 method 當類名(避免 class==method 同名)
+    prefix = "TEST" + re.sub(r"[^A-Za-z]", "", method).upper()[:7]
+    text = tpl_path.read_text(encoding="utf-8")
+    for k, v in {"CLASS": klass, "METHOD": method, "NODE": rel,
+                 "INVARIANT": clean, "CLAIM": claim, "PREFIX": prefix}.items():
+        text = text.replace("{{" + k + "}}", v)
+    leftover = sorted(set(re.findall(r"\{\{[^}]+\}\}", text)))
+    if leftover:
+        print(f"⚠ 範本有未取代的 placeholder {leftover}(範本 typo?)— 仍寫出,請檢查產出檔",
+              file=sys.stderr)
+    out = Path(out_dir) if out_dir else _detect_test_dir(repo_root, gtype, profile)
+    if out is None:
+        print("ERROR: 偵測不到測試專案目錄,請給 --out", file=sys.stderr)
+        return 2
+    if not out.is_dir():
+        print(f"ERROR: 輸出目錄不存在: {out}(打錯路徑?先 mkdir 或修正 --out)", file=sys.stderr)
+        return 2
+    target = out / f"{klass}{profile['scaffold_ext']}"
+    if target.exists():
+        print(f"ERROR: {target} 已存在,不覆寫(避免蓋掉既有守衛)", file=sys.stderr)
+        return 2
+    target.write_text(text, encoding="utf-8")
+    print(f"✓ 已產 stub: {target}")
+    print(f"  類型: {gtype}  |  方法: {method}  |  守衛: {clean[:70]}")
+    print("\n下一步(Claude/人):")
+    print(f"  1. 開 {target.name},把 // TODO 換成『已向人確認的斷言』"
+          f"(預設 {profile['fail_hint']} → 必須填到綠)")
+    print(f"  2. 綁回圖譜:  lumos guard bind {rel} \"{invariant_substr}\" {method}")
+    print(f"  3. lumos doctor 確認 Check T 通過")
+    return 0
+
+
+def cmd_guard_bind(env, node, invariant_substr, method):
+    if not IDENT_RE.match(method):
+        print(f"ERROR: method『{method}』非合法識別字", file=sys.stderr)
+        return 2
+    rel = env.find(node)
+    if rel is None:
+        print(f"ERROR: 找不到節點 {node}", file=sys.stderr)
+        return 2
+    path = env.vault / rel
+    try:
+        lines, _, e = load_raw_for_edit(path)
+    except (ValueError, RuntimeError) as ex:
+        print(f"ERROR: {ex}", file=sys.stderr)
+        return 2
+    target_idx = None
+    for i in range(1, e):
+        # 比對去掉 [test:..] 後的行(子字串不誤命中既有測試名)
+        if INVARIANT_RE.match(lines[i].strip()) and invariant_substr in TEST_REF_RE.sub("", lines[i]):
+            if target_idx is not None:
+                print(f"ERROR: 『{invariant_substr}』命中多條 KEY 行,請給更精確子字串", file=sys.stderr)
+                return 2
+            target_idx = i
+    if target_idx is None:
+        print(f"ERROR: {rel} 找不到含『{invariant_substr}』的 ★INVARIANT★ KEY 行", file=sys.stderr)
+        return 2
+    line = lines[target_idx]
+    m = TEST_REF_RE.search(line)
+    if m:
+        refs = [t.strip() for t in m.group(1).split(",") if t.strip()]
+        if method in refs:
+            print(f"已綁 [test:{method}],無需重綁")
+            return 0
+        refs.append(method)
+        newline = line[:m.start()] + f"[test:{','.join(refs)}]" + line[m.end():]
+    else:
+        newline = line.rstrip() + f" [test:{method}]"
+    new_lines = lines[:target_idx] + [newline] + lines[target_idx + 1:]
+
+    def check(fields):
+        summ = fields.get("summary")
+        if not isinstance(summ, str):
+            return False
+        for l in summ.split("\n"):
+            mi = INVARIANT_RE.match(l.strip())
+            if mi and invariant_substr in l:
+                return method in invariant_test_refs(mi.group(1))
+        return False
+
+    try:
+        atomic_write_verify(path, new_lines, f"[test:{method}]", check)
+    except (ValueError, RuntimeError) as ex:
+        print(f"ERROR: {ex}", file=sys.stderr)
+        return 2
+    print(f"✓ 綁定 [test:{method}] → {rel} 的 ★INVARIANT★")
+    print("  下一步: lumos doctor — 方法須已存在於 code,否則 Check T 顯示懸空")
+    return 0
+
+
+def cmd_guard_trace(env, node=None):
+    """合約 → 守衛測試 → Verification 證據 的鏈(reverse lookup)。
+    用途:改某模組前,看它的 ★INVARIANT★ 各綁哪個測試、哪篇 Verification 背書 →
+    breaking change 的爆炸半徑可查(grep 輸出某測試名即反查)。"""
+    rel = None
+    if node:
+        rel = env.find(node)
+        if rel is None:
+            print(f"ERROR: 找不到節點 {node}", file=sys.stderr)
+            return 2
+    # 預掃所有 Verification 全文 → 之後查「哪篇提到某測試方法名」。
+    # 剝 fenced/inline code(對齊 load_vault 的 body 連結抽取慣例 — code block 內宣告不算證據)。
+    verif_text = {}
+    for r in env.notes:
+        if r.startswith("Verification/"):
+            try:
+                raw = (env.vault / r).read_text(encoding="utf-8-sig")
+                verif_text[r] = INLINE_CODE_RE.sub("", FENCE_RE.sub("", raw))
+            except Exception:
+                verif_text[r] = ""
+    targets = [rel] if rel else sorted(env.notes)
+    nodes_with_inv = 0
+    short_names = set()
+    for r in targets:
+        inv, _ = extract_contracts(env.notes[r])
+        if not inv:
+            continue
+        nodes_with_inv += 1
+        print(f"# {r}")
+        for x in inv:
+            clean, refs = strip_test_refs(x)
+            print(f"  ★INVARIANT★ {clean[:78]}")
+            if not refs:
+                print("      ↳ ⚠ 未綁測試")
+                continue
+            for mth in refs:
+                if len(mth) < 10:
+                    short_names.add(mth)
+                # re.ASCII:方法名 ASCII;否則中文緊貼方法名(無空格)時 \b 失效漏命中
+                pat = re.compile(r"\b" + re.escape(mth) + r"\b", re.ASCII)
+                vs = sorted(env.notes[vr].stem for vr, t in verif_text.items() if pat.search(t))
+                tail = ", ".join(vs) if vs else "(無 Verification 提到此守衛)"
+                print(f"      ↳ [test:{mth}]  →  {tail}")
+    if nodes_with_inv == 0:
+        print("(無 ★INVARIANT★ 合約)" if rel else "(全 vault 無合約)")
+        return 0
+    print("\n※ 「→」是 Verification 全文【字串命中】(非結構化背書):不分正/否定句,"
+          "也抓不到「有驗但沒寫方法名」的篇。當證據鏈線索用,別當鐵證。")
+    if short_names:
+        print(f"⚠ 短方法名 {sorted(short_names)} 易誤命中(全文裡剛好出現該字),建議用長、領域專屬名。")
+    return 0
+
+
+def cmd_sync_verified_by(env, apply=False):
+    """補 doctor Check 3 抓到的 verified_by 漏寫(Verification 連到 Systems、但 Systems.verified_by 沒列)。
+    只動這一個『零判斷』項 — orphan 補掛 / plan_refs 需語意判斷,不在此自動修。
+    dry-run 預設;--apply 才寫(T1 atomic append,自帶 dedup)。"""
+    from collections import defaultdict
+    notes, resolve = env.notes, env.resolve
+    expected = defaultdict(set)
+    for r, n in notes.items():
+        if not r.startswith("Verification/"):
+            continue
+        for t in n.targets:
+            dest = resolve(t)
+            if dest and dest.startswith("Systems/"):
+                expected[dest].add(r)
+    planned = []
+    for sys_rel, verif_rels in sorted(expected.items()):
+        actual = {resolve(link_target(a))
+                  for a in as_list(notes[sys_rel].fields.get("verified_by"))}
+        actual.discard(None)
+        for v in sorted(verif_rels):
+            if v not in actual:
+                vl = v[:-3] if v.endswith(".md") else v
+                planned.append((sys_rel, f"[[{vl}]]"))
+    if not planned:
+        print("✓ verified_by 已全同步,無漏寫")
+        return 0
+    for sys_rel, vl in planned:
+        print(f"  {'+' if apply else '·'} {sys_rel}  ← {vl}")
+    if not apply:
+        print(f"\n{len(planned)} 筆待補(dry-run)。加 --apply 真寫入。")
+        print("※ 判準同 doctor Check 3:Verification 連到某 Systems 即視為驗證它。"
+              "若連結是『描述性提及』(如「取代 [[Systems/舊]]」)會誤補 → 先審這份 dry-run 再 --apply。")
+        return 0
+    print()
+    n_ok = 0
+    for sys_rel, vl in planned:
+        try:
+            if cmd_append(env, sys_rel, "verified_by", vl) == 0:
+                n_ok += 1
+        except (ValueError, RuntimeError) as ex:
+            print(f"  ✗ {sys_rel} {vl}: {ex}", file=sys.stderr)
+    print(f"\n✓ 補了 {n_ok}/{len(planned)} 筆 verified_by")
+    return 0
+
+
+def cmd_context(env, rel, brief=False):
+    """節點 + 鄰居 summary 壓縮索引 — MemPalace closet 具象化
+    brief=True: 只給 meta + summary 首兩行 + 鄰居名單(壓 token 用)"""
+    n = env.notes[rel]
+    out_e, in_e = env.edges
+    meta = " | ".join(f"{k}:{n.fields[k]}" for k in ("type", "status", "created", "updated")
+                      if isinstance(n.fields.get(k), str) and n.fields.get(k))
+    print(f"# {rel}")
+    if meta:
+        print(meta)
+    inv, debt = extract_contracts(n)
+    if inv or debt:
+        print("⚠ 合約(動前必讀):")
+        for x in inv:
+            print(f"  ★INVARIANT★ {x}")
+        for x in debt:
+            print(f"  ★DEBT★ {x}")
+    summ = n.fields.get("summary")
+    if isinstance(summ, str) and summ:
+        lines = summ.split("\n")
+        if brief:
+            lines = lines[:2]
+        print("summary:")
+        for l in lines:
+            print(f"  {first_line(l, 100) if brief else l}")
+    for key in ("verified_by", "plan_refs", "core_refs"):
+        vals = as_list(n.fields.get(key))
+        if vals:
+            print(f"{key}: {', '.join(vals)}")
+    for label, rows in (("→ 連出", sorted(set(out_e.get(rel, [])))),
+                        ("← 連入", sorted(set(in_e.get(rel, []))))):
+        print(f"{label} ({len(rows)}):")
+        for d in rows:
+            if brief:
+                print(f"  • {d} [{status_of(env, d)}]")
+                continue
+            nb = env.notes[d]
+            s = nb.fields.get("summary")
+            hint = first_line(s if isinstance(s, str) else "")
+            print(f"  • {d} [{status_of(env, d)}]" + (f" — {hint}" if hint else ""))
+    return 0
+
+
+def parse_decisions(fm_lines):
+    """從 frontmatter 原始行解析 decisions 陣列(content/decided/valid/superseded_by/ended)"""
+    items = []
+    i, n = 0, len(fm_lines)
+    while i < n and not re.match(r"^decisions:\s*$", fm_lines[i]):
+        i += 1
+    if i >= n:
+        return items
+    i += 1
+    cur = None
+
+    def indent(s):
+        return len(s) - len(s.lstrip(" "))
+
+    while i < n:
+        line = fm_lines[i]
+        if line.strip() and not line.startswith(" "):
+            break  # 下一個 top-level key
+        m_item = re.match(r"^(\s*)-\s+([\w-]+):\s*(.*)$", line)
+        m_kv = re.match(r"^(\s+)([\w-]+):\s*(.*)$", line)
+        if m_item:
+            cur = {}
+            items.append(cur)
+            key, val = m_item.group(2), m_item.group(3).strip()
+            base = indent(line)
+            key_col = base + 2          # dash line: key 在「- 」之後,有效欄位 = base+2
+        elif m_kv and cur is not None:
+            key, val = m_kv.group(2), m_kv.group(3).strip()
+            base = indent(line)
+            key_col = base              # 子欄位: key 欄位 = base
+        else:
+            i += 1
+            continue
+        if val in ("|", "|-", ">", ">-"):
+            # block scalar 終止 = 首個縮排 <= key_col 的非空行(否則會把兄弟欄位吸進 content,Bug1)
+            block = []
+            i += 1
+            while i < n and (not fm_lines[i].strip() or indent(fm_lines[i]) > key_col):
+                if fm_lines[i].strip():
+                    block.append(fm_lines[i].strip())
+                i += 1
+            cur[key] = "\n".join(block)
+            continue
+        if val == "":
+            lst = []
+            i += 1
+            while i < n and fm_lines[i].strip() and indent(fm_lines[i]) > base \
+                    and re.match(r"^\s+-\s+", fm_lines[i]):
+                lst.append(strip_quotes(re.match(r"^\s+-\s+(.*)$", fm_lines[i]).group(1).strip()))
+                i += 1
+            cur[key] = lst
+            continue
+        cur[key] = strip_quotes(val)
+        i += 1
+    return items
+
+
+def fmt_decision(d):
+    mark = "✅" if str(d.get("valid", "true")).lower() != "false" else "❌"
+    line = f"{mark} [{d.get('decided', '?')}] {first_line(d.get('content', ''), 100)}"
+    if d.get("superseded_by"):
+        line += f" → {d['superseded_by']}"
+    return line
+
+
+def cmd_decisions(env, rel=None, superseded=False):
+    if superseded:
+        found = []
+        for r, n in sorted(env.notes.items()):
+            for d in parse_decisions(n.fm_lines):
+                if str(d.get("valid", "true")).lower() == "false":
+                    found.append(f"{n.stem}: {first_line(d.get('content', ''), 80)}"
+                                 f" → {d.get('superseded_by', '?')}")
+        print("\n".join(found) if found else "無被推翻的決策")
+        return 0
+    ds = parse_decisions(env.notes[rel].fm_lines)
+    if not ds:
+        print(f"{rel}: 無 decisions")
+        return 0
+    for d in ds:
+        print(fmt_decision(d))
+    return 0
+
+
+def _conds(val):
+    """frontmatter list / 字串 / block scalar → 逐條件展開(去空行)。
+    block scalar 存成含 \\n 的單一字串,split 開以免後續行被 first_line 截掉。"""
+    out = []
+    for c in as_list(val):
+        out += [ln.strip() for ln in str(c).split("\n") if ln.strip()]
+    return out
+
+
+def cmd_stale(env, match=None, candidate=False):
+    if match is not None and not match.strip():          # NEW-1:空 --match 會 "" in c 恆真=全掃
+        print("ERROR: --match 不可為空字串", file=sys.stderr)
+        return 2
+    if candidate and not match:                          # Finding 6:bare --candidate ≈ 列全部=噪音
+        print("ERROR: --candidate 必須配 --match <關鍵字>(例: stale --candidate --match DispatchLog)。\n"
+              "  語意=『改某流程時,哪些活躍 Verification 的 revalidate_when 提到該關鍵字 → 該重驗』;\n"
+              "  本圖譜每篇 Verification 都有 revalidate_when,不帶 --match = 列全部,無篩選意義。",
+              file=sys.stderr)
+        return 2
+    if candidate:
+        # 聚焦查詢:活躍(非 Archive)+ revalidate_when 提到關鍵字 = 「改 X 時該重驗的那幾篇」。
+        # 與純 --match 的差別:只掃 revalidate_when(未來重驗條件,不含 valid_under 快照條件)、排 Archive。
+        rows, n_hit = [], 0
+        for rel, n in sorted(env.notes.items()):
+            if not rel.startswith("Verification/") or "/Archive/" in rel:
+                continue
+            rw = [c for c in _conds(n.fields.get("revalidate_when")) if match in c]
+            if not rw:
+                continue
+            n_hit += 1
+            rows.append(f"{rel} [{status_of(env, rel) or 'no-status'}]")
+            rows += [f"    ↳ {first_line(c, 90)}" for c in rw]
+        if not rows:
+            print(f"無 revalidate_when 提到『{match}』的活躍 Verification")
+            return 0
+        print("\n".join(rows))
+        print(f"\n{n_hit} 篇 revalidate_when 提到『{match}』→ 逐一判斷是否需重驗"
+              f"(`lumos set <篇> status stale`)。")
+        return 0
+    rows = []
+    for rel, n in sorted(env.notes.items()):
+        if not rel.startswith("Verification/"):
+            continue
+        arch = " [archived]" if "/Archive/" in rel else ""   # Archive 命中明確標記
+        if match:
+            hit = [c for c in (_conds(n.fields.get("valid_under"))
+                               + _conds(n.fields.get("revalidate_when"))) if match in c]
+            if hit:
+                rows.append(f"{rel} [{status_of(env, rel) or 'no-status'}]{arch}")
+                rows += [f"    ↳ {first_line(h, 90)}" for h in hit]
+        elif status_of(env, rel) == "stale":
+            rows.append(f"{rel} [stale]{arch}")               # NEW-2:格式統一加 [stale]
+    if rows:
+        print("\n".join(rows))
+    else:
+        print("無命中" if match else "無 status:stale 的驗證")
+    return 0
+
+
+def cmd_recent(env, days):
+    cutoff = time.time() - days * 86400
+    rows = sorted(((n.mtime, rel) for rel, n in env.notes.items() if n.mtime >= cutoff),
+                  reverse=True)
+    for mt, rel in rows:
+        print(f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(mt))}  {rel}")
+    print(f"({len(rows)} 篇 / 最近 {days} 天)")
+    return 0
+
+
+def cmd_stats(env):
+    folders = defaultdict(int)
+    for rel in env.notes:
+        folders[rel.split("/")[0] if "/" in rel else "(root)"] += 1
+    width = max(len(k) for k in folders)
+    for k in sorted(folders):
+        print(f"{k:<{width}}  {folders[k]}")
+    print(f"{'total':<{width}}  {len(env.notes)}")
+    return 0
+
+
+def cmd_export(env, fmt, folders):
+    out_e, _ = env.edges
+    include = [rel for rel in env.notes
+               if rel.split("/")[0] in folders]
+    ids = {rel: f"n{i}" for i, rel in enumerate(sorted(include))}
+    if fmt == "dot":
+        print("digraph G {")
+        for rel, nid in ids.items():
+            label = env.notes[rel].stem.replace("\\", "\\\\").replace('"', '\\"')
+            print(f'  {nid} [label="{label}"];')
+        for rel, nid in ids.items():
+            for d in out_e.get(rel, []):
+                if d in ids:
+                    print(f"  {nid} -> {ids[d]};")
+        print("}")
+        return 0
+    print("flowchart LR")
+    for rel, nid in ids.items():
+        label = env.notes[rel].stem.replace('"', "&quot;")  # mermaid quoted label 逸出
+        print(f'    {nid}["{label}"]')
+    for rel, nid in ids.items():
+        for d in sorted(set(out_e.get(rel, []))):
+            if d in ids:
+                print(f"    {nid} --> {ids[d]}")
+    return 0
+
+
+_HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumos · 圖譜語意視圖 · __VAULT__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  :root{
+    --bg:#090b11; --surface:#0f1219; --surface2:#161a24; --surface3:#1e2330;
+    --border:#212636; --border-soft:#191d29;
+    --text:#edeff6; --muted:#7c8398; --faint:#525a70;
+    --sys:#6ba5ff; --ver:#4fd6a8; --iss:#f5b15c; --proj:#b98cff; --moc:#8b93ad;
+    --gold:#ffce6b; --stale:#ff7b91; --accent:#6ba5ff;
+    --shadow:0 24px 70px -12px rgba(0,0,0,.7);
+    --font-ui:"Space Grotesk",-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei",sans-serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei","Noto Sans CJK TC",sans-serif;
+    --font-mono:"JetBrains Mono","SF Mono",ui-monospace,monospace;
+    --sp1:4px;--sp2:8px;--sp3:12px;--sp4:16px;--sp5:24px;--sp6:32px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:var(--font-body);-webkit-font-smoothing:antialiased;overflow:hidden}
+  /* 柔光背景:頂部 accent 輻射 + 底部 stale 暈,極低透明,作為深度 */
+  body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:radial-gradient(1300px 900px at 50% 46%,rgba(46,60,92,.22),transparent 72%),
+               radial-gradient(900px 520px at 18% -8%,rgba(107,165,255,.10),transparent 70%),
+               radial-gradient(760px 480px at 94% 112%,rgba(185,140,255,.08),transparent 70%)}
+  #top{position:fixed;top:0;left:0;right:0;height:64px;z-index:10;display:flex;align-items:center;
+    gap:var(--sp5);padding:0 var(--sp5);background:rgba(9,11,17,.66);backdrop-filter:blur(22px) saturate(140%);
+    border-bottom:1px solid var(--border-soft)}
+  .brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+  .brand .mark{width:22px;height:22px;border-radius:7px;
+    background:conic-gradient(from 210deg,var(--sys),var(--proj),var(--ver),var(--sys));
+    box-shadow:0 0 18px rgba(107,165,255,.45)}
+  .brand h1{font-family:var(--font-ui);font-size:15px;font-weight:600;letter-spacing:.2px;margin:0}
+  .brand .sub{font-family:var(--font-mono);color:var(--faint);font-size:11px;margin-top:1px;letter-spacing:.2px}
+  #search{flex:0 0 230px;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    color:var(--text);padding:9px 13px;font-size:13px;font-family:var(--font-body);outline:none;
+    transition:border-color .18s,box-shadow .18s}
+  #search::placeholder{color:var(--faint)}
+  #search:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(107,165,255,.16)}
+  .chips{display:flex;gap:var(--sp2);flex-wrap:wrap;align-items:center}
+  .chip{font-family:var(--font-ui);font-size:11.5px;font-weight:500;padding:6px 12px;border-radius:9px;
+    border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;user-select:none;
+    transition:all .18s cubic-bezier(.22,.61,.36,1);display:flex;align-items:center;gap:7px;letter-spacing:.2px}
+  .chip:active{transform:scale(.95)}
+  .chip .dot{width:8px;height:8px;border-radius:50%;box-shadow:0 0 8px currentColor}
+  .chip.on{color:var(--text);background:var(--surface2);border-color:var(--faint)}
+  .chip.off{opacity:.38}
+  #cy{position:fixed;top:64px;left:0;right:0;bottom:0;z-index:1}
+  #panel{position:fixed;top:64px;right:0;bottom:0;width:460px;max-width:90vw;z-index:9;
+    background:linear-gradient(180deg,var(--surface),#0c0e15);border-left:1px solid var(--border);
+    box-shadow:var(--shadow);transform:translateX(102%);
+    transition:transform .42s cubic-bezier(.16,1,.3,1);display:flex;flex-direction:column}
+  #panel.open{transform:translateX(0)}
+  #phead{padding:var(--sp5) var(--sp5) var(--sp4);border-bottom:1px solid var(--border-soft);position:relative}
+  #phead .kicker{font-family:var(--font-mono);font-size:10.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--faint);margin-bottom:7px}
+  #phead .ttl{font-family:var(--font-ui);font-size:19px;font-weight:600;line-height:1.34;letter-spacing:.2px;padding-right:34px}
+  #phead .meta{margin-top:13px;display:flex;gap:7px;flex-wrap:wrap}
+  .badge{font-family:var(--font-ui);font-size:11px;padding:4px 10px;border-radius:7px;font-weight:600;letter-spacing:.3px}
+  .badge.type{color:#090b11}
+  .badge.status{background:var(--surface3);color:var(--muted);border:1px solid var(--border)}
+  .badge.inv{background:rgba(255,206,107,.13);color:var(--gold);border:1px solid rgba(255,206,107,.32)}
+  .badge.stale{background:rgba(255,123,145,.13);color:var(--stale);border:1px solid rgba(255,123,145,.38)}
+  #pbody{padding:var(--sp4) var(--sp5) var(--sp6);overflow-y:auto;flex:1;font-size:13.5px;line-height:1.74;color:#cfd4e3}
+  #pbody h1,#pbody h2,#pbody h3{font-family:var(--font-ui);font-weight:600;letter-spacing:.2px;margin:24px 0 11px;line-height:1.4;color:var(--text)}
+  #pbody h1{font-size:18px} #pbody h2{font-size:15.5px}
+  #pbody h2::before{content:"";display:inline-block;width:3px;height:14px;background:var(--accent);border-radius:2px;margin-right:9px;vertical-align:-2px}
+  #pbody h3{font-size:13.5px;color:var(--muted)}
+  #pbody p{margin:10px 0}
+  #pbody code{background:var(--surface2);padding:2px 6px;border-radius:5px;font-size:12px;font-family:var(--font-mono);color:#a8d4ff}
+  #pbody pre{background:#070910;border:1px solid var(--border);border-radius:11px;padding:14px 16px;overflow-x:auto}
+  #pbody pre code{background:none;padding:0;color:#c5cadb}
+  #pbody table{border-collapse:collapse;width:100%;font-size:12px;margin:13px 0;border-radius:8px;overflow:hidden}
+  #pbody th,#pbody td{border:1px solid var(--border);padding:7px 11px;text-align:left}
+  #pbody th{background:var(--surface2);font-weight:600;color:var(--text)}
+  #pbody blockquote{border-left:2px solid var(--accent);margin:11px 0;padding:3px 15px;color:var(--muted);background:rgba(107,165,255,.04);border-radius:0 8px 8px 0}
+  #pbody ul,#pbody ol{padding-left:22px;margin:9px 0}
+  #pbody li{margin:4px 0}
+  .wl{color:var(--sys);cursor:pointer;text-decoration:none;border-bottom:1px solid rgba(107,165,255,.28);transition:border-color .15s}
+  .wl:hover{border-bottom-color:var(--sys)}
+  #close{position:absolute;top:var(--sp5);right:var(--sp5);cursor:pointer;color:var(--muted);font-size:18px;
+    width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;
+    border:1px solid var(--border-soft);transition:all .15s}
+  #close:hover{background:var(--surface3);color:var(--text);border-color:var(--border)}
+  .floatcard{position:fixed;z-index:8;background:rgba(15,18,25,.78);backdrop-filter:blur(16px) saturate(140%);
+    border:1px solid var(--border);border-radius:13px;box-shadow:0 10px 40px -10px rgba(0,0,0,.6)}
+  #legend{left:var(--sp5);bottom:var(--sp5);padding:14px 16px;font-size:11.5px;color:var(--muted)}
+  #legend .lt{font-family:var(--font-mono);font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  #legend .row{display:flex;align-items:center;gap:9px;margin:5px 0}
+  #legend .sw{width:11px;height:11px;border-radius:50%;box-shadow:0 0 8px currentColor}
+  #legend .ed{width:20px;height:0;border-top:2px solid}
+  #hint{position:fixed;left:50%;bottom:var(--sp5);transform:translateX(-50%);z-index:8;color:var(--faint);
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.3px;transition:opacity .4s}
+  ::-webkit-scrollbar{width:10px} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;border:2px solid var(--surface)}
+  ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+</style>
+</head>
+<body>
+<div id="top">
+  <div class="brand"><div class="mark"></div>
+    <div><h1>Lumos · 圖譜語意視圖</h1><div class="sub">__VAULT__ · __NC__ nodes / __EC__ edges · __STAMP__</div></div>
+  </div>
+  <input id="search" placeholder="搜尋節點…" autocomplete="off">
+  <div class="chips" id="typechips"></div>
+  <div class="chip on" id="staletoggle"><span class="dot" style="background:var(--stale)"></span>只看 stale</div>
+</div>
+<div id="cy"></div>
+<div id="panel">
+  <div id="close">✕</div>
+  <div id="phead"><div class="kicker"></div><div class="ttl"></div><div class="meta"></div></div>
+  <div id="pbody"></div>
+</div>
+<div id="legend" class="floatcard"></div>
+<div id="hint">點節點 → 高亮鄰域 + 飛入聚焦 · 拖曳旋轉 · 滾輪縮放 · 右鍵平移</div>
+<script>
+const DATA = __DATA__;
+const TYPE_COLOR = {system:'#6ba5ff',verification:'#4fd6a8',issue:'#f5b15c',project:'#b98cff',moc:'#8b93ad'};
+const GOLD='#ffd479', STALE='#ff7b91', DIMN='#151924', DIML='rgba(74,84,116,.035)';
+const LINKBASE={verify:'#3fbf95',plan:'#a87fe6',link:'#4a5474'};
+const tc = t => TYPE_COLOR[t] || '#8b93ad';
+const byId = {}; DATA.nodes.forEach(n=>byId[n.id]=n);
+function baseColor(n){ if(n.status==='stale') return STALE; if(n.inv&&n.inv.length) return GOLD; return tc(n.type); }
+
+// 3d-force-graph 會把 link.source/target 由 id 字串置換成 node 物件參照(= gdata.nodes 的同一物件)
+const gdata = {nodes:DATA.nodes, links:DATA.edges.map(e=>({source:e.source,target:e.target,kind:e.kind}))};
+const nodeOf = x => (x && x.id!==undefined) ? x : byId[x];
+
+// ---- 高亮狀態(點選 = 只亮鄰域,其餘暗化)----
+const hlN=new Set(), hlL=new Set(); let sel=null;
+const types=[...new Set(DATA.nodes.map(n=>n.type))];
+const active=new Set(types); let staleOnly=false;
+function nvisible(n){ return active.has(n.type) && (!staleOnly || n.status==='stale'); }
+
+function ncolor(n){ if(hlN.size && !hlN.has(n)) return DIMN; if(n===sel) return '#ffffff'; return baseColor(n); }
+function lcolor(l){ if(hlL.size && !hlL.has(l)) return DIML; return LINKBASE[l.kind]||'#2d3346'; }
+function lwidth(l){ return hlL.has(l)?2:0.35; }
+function lparticles(l){ return (hlL.has(l) || (hlL.size===0 && l.kind==='plan'))?2:0; }
+function larrow(l){ if(hlL.size) return hlL.has(l)?3.4:0; return 2.2; }
+
+const Graph = ForceGraph3D()(document.getElementById('cy'));
+
+// ★ 力場必須在 graphData 之前設定:warmup 在 graphData 當下就用當時的力場把佈局跑完;
+//   若事後才改強斥力,模擬已冷卻、救不回 → 永遠擠成「病毒團」。這圖很密(~11 邊/點),
+//   link 吸引力會壓過斥力,故大幅加強斥力 + 拉長連線 + 減弱 link 拉力。
+Graph.d3Force('charge').strength(-240);
+Graph.d3Force('link').distance(l => l.kind==='plan' ? 90 : 65).strength(0.18);
+Graph.d3VelocityDecay(0.3);
+
+Graph
+  .graphData(gdata)
+  .warmupTicks(70)        // 首次繪製前先跑 70 tick(用上面強斥力)→ 一開圖就是攤開的星座,不靠時機
+  .cooldownTicks(160)
+  .backgroundColor('rgba(0,0,0,0)')
+  .showNavInfo(false)
+  .nodeRelSize(4)
+  .nodeVal(n=>0.8+Math.pow(Math.min(n.indeg,18),1.15)*0.4)
+  .nodeColor(ncolor)
+  .nodeOpacity(0.9)
+  .nodeResolution(18)
+  .nodeLabel(n=>'<div style="font:600 12px Space Grotesk,sans-serif;color:#edeff6;background:rgba(15,18,25,.92);padding:5px 10px;border:1px solid #2a3145;border-radius:8px;box-shadow:0 6px 20px -6px rgba(0,0,0,.7)">'+n.label+'<span style="color:#7c8398;font-weight:400"> · '+n.type+(n.status==='stale'?' · stale':'')+(n.inv&&n.inv.length?' · ★'+n.inv.length:'')+'</span></div>')
+  .linkColor(lcolor)
+  .linkOpacity(0.2)
+  .linkWidth(lwidth)
+  .linkDirectionalArrowLength(larrow)
+  .linkDirectionalArrowRelPos(1)
+  .linkDirectionalParticles(lparticles)
+  .linkDirectionalParticleWidth(1.2)
+  .linkDirectionalParticleSpeed(0.005)
+  .nodeVisibility(nvisible)
+  .linkVisibility(l=>nvisible(nodeOf(l.source))&&nvisible(nodeOf(l.target)))
+  .onNodeClick(focusNode)
+  .onBackgroundClick(clearSel);
+
+// 貼合 top bar 下方的容器尺寸(預設會用整個 window 高度,會被頂欄遮 64px)
+function sizeGraph(){ Graph.width(window.innerWidth).height(window.innerHeight-64); }
+sizeGraph(); window.addEventListener('resize', sizeGraph);
+
+function refresh(){
+  Graph.nodeColor(ncolor).linkColor(lcolor).linkWidth(lwidth)
+       .linkDirectionalArrowLength(larrow).linkDirectionalParticles(lparticles);
+}
+function applyVis(){
+  Graph.nodeVisibility(nvisible)
+       .linkVisibility(l=>nvisible(nodeOf(l.source))&&nvisible(nodeOf(l.target)));
+}
+
+// ---- 點選節點:只高亮自己+鄰居+相連邊,飛入聚焦 ----
+function focusNode(n){
+  hlN.clear(); hlL.clear(); sel=n; hlN.add(n);
+  gdata.links.forEach(l=>{
+    const s=nodeOf(l.source), t=nodeOf(l.target);
+    if(s===n){ hlL.add(l); hlN.add(t); }
+    else if(t===n){ hlL.add(l); hlN.add(s); }
+  });
+  refresh();
+  const dist=180, h=Math.hypot(n.x||1,n.y||1,n.z||1)||1, r=1+dist/h;
+  Graph.cameraPosition({x:(n.x||0)*r,y:(n.y||0)*r,z:(n.z||0)*r}, n, 1100);
+  open(n);
+}
+function clearSel(){ hlN.clear(); hlL.clear(); sel=null; refresh(); panel.classList.remove('open'); }
+
+// ---- 側欄 ----
+const panel=document.getElementById('panel'),ttl=panel.querySelector('.ttl'),
+      kicker=panel.querySelector('.kicker'),
+      meta=panel.querySelector('.meta'),pbody=document.getElementById('pbody');
+function strip(raw){const m=raw.match(/^---\n[\s\S]*?\n---\n?/);return m?raw.slice(m[0].length):raw;}
+function wl(html){return html.replace(/\[\[([^\]|#]+)(?:[^\]]*)\]\]/g,(m,t)=>
+  '<a class="wl" data-t="'+t.trim()+'">'+t.trim()+'</a>');}
+function open(n){
+  kicker.textContent=n.rel.replace(/\.md$/,'');
+  ttl.textContent=n.label;
+  let m='<span class="badge type" style="background:'+tc(n.type)+'">'+n.type+'</span>';
+  m+='<span class="badge status">'+(n.status||'—')+'</span>';
+  if(n.inv&&n.inv.length)m+='<span class="badge inv">★ '+n.inv.length+' 合約</span>';
+  if(n.status==='stale')m+='<span class="badge stale">stale</span>';
+  meta.innerHTML=m;
+  pbody.innerHTML=wl(marked.parse(strip(n.raw||'')));
+  pbody.querySelectorAll('.wl').forEach(a=>a.onclick=()=>{
+    const hit=DATA.nodes.find(x=>x.label===a.dataset.t||x.rel.endsWith('/'+a.dataset.t+'.md'));
+    if(hit) focusNode(hit);
+  });
+  pbody.scrollTop=0; panel.classList.add('open');
+}
+document.getElementById('close').onclick=clearSel;
+
+// ---- 搜尋:命中者高亮,其餘暗化 ----
+document.getElementById('search').oninput=e=>{
+  const q=e.target.value.trim().toLowerCase();
+  hlN.clear(); hlL.clear(); sel=null;
+  if(q) DATA.nodes.forEach(n=>{ if(n.label.toLowerCase().includes(q)) hlN.add(n); });
+  refresh();
+};
+
+// ---- type 過濾 chips ----
+const tcw=document.getElementById('typechips');
+types.forEach(t=>{
+  const c=document.createElement('div');c.className='chip on';
+  c.innerHTML='<span class="dot" style="background:'+tc(t)+'"></span>'+t;
+  c.onclick=()=>{active.has(t)?active.delete(t):active.add(t);
+    c.classList.toggle('on');c.classList.toggle('off');applyVis();};
+  tcw.appendChild(c);
+});
+
+// ---- stale 切換(預設 off=全部;on=只看 stale)----
+const st=document.getElementById('staletoggle');st.classList.remove('on');st.classList.add('off');
+st.onclick=()=>{staleOnly=!staleOnly;st.classList.toggle('on');st.classList.toggle('off');applyVis();};
+
+// ---- legend ----
+document.getElementById('legend').innerHTML='<div class="lt">Legend</div>'+
+  Object.entries(TYPE_COLOR).map(([t,c])=>'<div class="row"><span class="sw" style="background:'+c+';color:'+c+'"></span>'+t+'</div>').join('')
+  +'<div class="row"><span class="sw" style="background:'+GOLD+';color:'+GOLD+'"></span>★ 合約 invariant</div>'
+  +'<div class="row"><span class="sw" style="background:'+STALE+';color:'+STALE+'"></span>stale(腐爛)</div>'
+  +'<div class="row"><span class="ed" style="border-color:#b98cff"></span>plan_refs(粒子流)</div>'
+  +'<div class="row"><span class="ed" style="border-color:#4fd6a8"></span>verified_by</div>';
+setTimeout(()=>{const h=document.getElementById('hint');if(h)h.style.opacity=0;},7000);
+</script>
+</body>
+</html>"""
+
+
+def _html_model(env):
+    """蒐集語意模型給 HTML 視圖:nodes(含 type/status/合約/stale/raw)+ typed edges。"""
+    out_e, in_e = env.edges
+    nodes, edges, seen = [], [], set()
+    for rel, n in env.notes.items():
+        inv, debt = extract_contracts(n)
+        summ = n.fields.get("summary")
+        summ = summ if isinstance(summ, str) else ""
+        status = status_of(env, rel)
+        ntype = n.fields.get("type")
+        ntype = ntype if isinstance(ntype, str) and ntype else rel.split("/")[0].lower()
+        try:
+            raw = (env.vault / rel).read_text(encoding="utf-8-sig")
+        except Exception:
+            raw = ""
+        nodes.append({
+            "id": rel, "label": n.stem, "rel": rel, "type": ntype, "status": status,
+            "folder": rel.split("/")[0], "inv": inv, "debt": debt,
+            "indeg": len(set(in_e.get(rel, []))),
+            "summary": [l.strip() for l in summ.split("\n") if l.strip()][:6],
+            "raw": raw,
+        })
+    # typed edges: plan_refs / verified_by / link
+    for rel, n in env.notes.items():
+        plan = {env.resolve(link_target(x)) for x in as_list(n.fields.get("plan_refs"))}
+        verify = {env.resolve(link_target(x)) for x in as_list(n.fields.get("verified_by"))}
+        plan.discard(None); verify.discard(None)
+        for d in set(out_e.get(rel, [])):
+            kind = "plan" if d in plan else "verify" if d in verify else "link"
+            key = (rel, d, kind)
+            if key not in seen:
+                seen.add(key)
+                edges.append({"source": rel, "target": d, "kind": kind})
+    return {"nodes": nodes, "edges": edges}
+
+
+_VIZ_LIBS = {
+    "3d-force-graph": ("https://cdn.jsdelivr.net/npm/3d-force-graph",
+                       '<script src="https://cdn.jsdelivr.net/npm/3d-force-graph"></script>'),
+    "marked": ("https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js",
+               '<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>'),
+}
+_FONT_LINKS = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+               '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+               '<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">')
+
+
+def _fetch_text(url, cache):
+    """下載文字資源並快取(scripts/vendor/)。離線重複 export 不再抓。
+    用 curl(走系統憑證;macOS python urllib 常無 cert store 致 SSL verify 失敗)。"""
+    import subprocess
+    if cache.exists():
+        return cache.read_text(encoding="utf-8")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    txt = subprocess.run(["curl", "-fsSL", url], capture_output=True, text=True,
+                         timeout=60, check=True).stdout
+    if not txt:
+        raise RuntimeError("空回應")
+    cache.write_text(txt, encoding="utf-8")
+    return txt
+
+
+def cmd_export_html(env, out_path, standalone=False):
+    import json
+    import datetime
+    model = _html_model(env)
+    # </script> 在嵌入 JSON 裡會提早關閉 <script> 標籤破壞整頁 → 轉義 </(標準作法)
+    data = json.dumps(model, ensure_ascii=False).replace("</", "<\\/")
+    stamp = datetime.date.today().isoformat()
+    html = _HTML_TEMPLATE.replace("__DATA__", data).replace("__STAMP__", stamp) \
+                         .replace("__VAULT__", env.vault.name) \
+                         .replace("__NC__", str(len(model["nodes"]))) \
+                         .replace("__EC__", str(len(model["edges"])))
+    if standalone:
+        # inline cytoscape/marked(去 CDN,防火牆/離線可開);字體退化系統字(移除 google link)
+        vendor = Path(__file__).resolve().parent / "vendor"
+        for name, (url, tag) in _VIZ_LIBS.items():
+            try:
+                src = _fetch_text(url, vendor / f"{name}.min.js").replace("</script", "<\\/script")
+            except Exception as e:
+                print(f"ERROR: --standalone 需抓 {name}(此機需一次網路): {e}", file=sys.stderr)
+                return 2
+            html = html.replace(tag, f"<script>{src}</script>")
+        html = html.replace(_FONT_LINKS, "<!-- standalone: 字體退化系統字(無外部 CDN) -->")
+    Path(out_path).write_text(html, encoding="utf-8")
+    mode = "standalone(自包含/離線可開)" if standalone else "CDN"
+    print(f"✓ export html [{mode}]: {out_path}  ({len(model['nodes'])} 節點 / {len(model['edges'])} 邊)")
+    return 0
+
+
+# ═══════════════════════ 階段三: 寫側 T1(行級手術) ═══════════════════════
+
+SCALAR_KEYS = {"status", "updated", "created", "type"}
+LIST_KEYS = {"verified_by", "plan_refs", "related", "tags"}
+DATE_KEYS = {"updated", "created", "date", "decided", "ended"}
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def fm_structure(fm_lines):
+    """回傳 ordered [(key, start, end, kind)]，kind ∈ scalar/list/block。
+    end = 該 key 區塊最後一行的 index(含)。"""
+    out = []
+    i, n = 0, len(fm_lines)
+    while i < n:
+        m = TOP_KEY_RE.match(fm_lines[i])
+        if not m:
+            i += 1
+            continue
+        key, val = m.group(1), m.group(2).strip()
+        start = i
+        if val in ("|", "|-", ">", ">-"):
+            i += 1
+            while i < n and (fm_lines[i].startswith("  ") or not fm_lines[i].strip()):
+                i += 1
+            out.append((key, start, i - 1, "block"))
+        elif val == "":
+            # 消費所有縮排行(含 list item 的 sub-mapping,如 decisions 的 content/decided),
+            # 與 parse_frontmatter 一致 → fm_structure 算出的 end 涵蓋整個區塊(BUG-5 對齊)
+            i += 1
+            while i < n and (fm_lines[i].startswith(" ") or not fm_lines[i].strip()):
+                i += 1
+            out.append((key, start, i - 1, "list"))
+        else:
+            out.append((key, start, start, "scalar"))
+            i += 1
+    return out
+
+
+def fmt_scalar(key, value):
+    """純量值格式化。日期 bare(不加引號避污染指紋);含 ': ' 或特殊字元才引號。"""
+    v = value.strip()
+    if key in DATE_KEYS:
+        if not DATE_RE.match(v):
+            raise ValueError(f"{key} 需 YYYY-MM-DD,得到: {v}")
+        return v  # bare,絕不加引號
+    # YAML 型別劫持守衛: true/false/null/yes/no/~ 與純數字當 status 會被解析成 bool/num/null
+    if v.lower() in ("true", "false", "null", "yes", "no", "on", "off", "~") or \
+       re.fullmatch(r"-?\d+(\.\d+)?", v):
+        return '"' + v + '"'
+    if re.search(r":\s|^[\[\{>|*&!#@`]|^\s|\s$", v) or v == "":
+        return '"' + v.replace('"', '\\"') + '"'
+    return v
+
+
+def fmt_list_item(value):
+    """list 項格式化。wikilink / 含特殊字元 → 引號(鐵則1 安全:一項一行)。"""
+    v = value.strip()
+    if v.startswith("[[") or re.search(r":\s|^[\[\{]", v):
+        return '"' + v.replace('"', '\\"') + '"'
+    return v
+
+
+def edit_fm_scalar(fm_lines, key, value):
+    fm = list(fm_lines)
+    formatted = fmt_scalar(key, value)
+    struct = {k: (s, e, kind) for k, s, e, kind in fm_structure(fm)}
+    if key in struct:
+        s, e, kind = struct[key]
+        if kind != "scalar":
+            raise ValueError(f"{key} 是 {kind} 型,set 只改純量(list 用 append,巢狀用 T3)")
+        fm[s] = f"{key}: {formatted}"
+    else:
+        # 插在開頭純量區之後(第一個 list/block key 之前,否則末尾)
+        ins = len(fm)
+        for k, s, e, kind in fm_structure(fm):
+            if kind in ("list", "block"):
+                ins = s
+                break
+        fm.insert(ins, f"{key}: {formatted}")
+    return fm
+
+
+def edit_fm_append(fm_lines, key, value):
+    fm = list(fm_lines)
+    item = fmt_list_item(value)
+    tgt = link_target(value)
+    struct = {k: (s, e, kind) for k, s, e, kind in fm_structure(fm)}
+    if key in struct:
+        s, e, kind = struct[key]
+        if kind != "list":
+            raise ValueError(f"{key} 是 {kind} 型,append 只加 list 項")
+        # dedup: 精確 full-target 比對(保留路徑;非子字串、非 basename-only)
+        for j in range(s + 1, e + 1):
+            existing = fm[j].strip()
+            if existing.startswith("-") and link_target(existing[1:]) == tgt:
+                return fm  # 已存在,no-op
+        # 偵測現有項縮排,否則預設 2 空格
+        indent = "  "
+        for j in range(s + 1, e + 1):
+            if fm[j].lstrip().startswith("-"):
+                indent = fm[j][:len(fm[j]) - len(fm[j].lstrip())]
+                break
+        # 插在最後一個非空行之後(避開區塊尾部空行,免在 list 中插出空行)
+        last = e
+        while last > s and not fm[last].strip():
+            last -= 1
+        fm.insert(last + 1, f"{indent}- {item}")
+    else:
+        ins = len(fm)
+        fm.insert(ins, key + ":")
+        fm.insert(ins + 1, f"  - {item}")
+    return fm
+
+
+def decisions_items(fm_lines):
+    """surgical 定位 decisions[] 的每個項目行範圍(不重序列化,延伸 T1 到巢狀)。
+    回傳 (block_start, block_end, [(item_start, item_end)], item_indent, sub_indent)
+    或 None(無 decisions)。item_end 含,已去尾部空行。處理項目內含 nested 子清單。"""
+    block = None
+    for k, s, e, kind in fm_structure(fm_lines):
+        if k == "decisions" and kind == "list":
+            block = (s, e)
+            break
+    if block is None:
+        return None
+    s, e = block
+    item_indent = None
+    starts = []
+    for i in range(s + 1, e + 1):
+        ln = fm_lines[i]
+        if not ln.strip():
+            continue
+        m = re.match(r"^(\s*)-\s", ln)
+        if m:
+            ind = len(m.group(1))
+            if item_indent is None:
+                item_indent = ind
+            if ind == item_indent:  # 只認最淺層 dash(子清單的 dash 更深,不算項目)
+                starts.append(i)
+    items = []
+    for idx, st in enumerate(starts):
+        en = (starts[idx + 1] - 1) if idx + 1 < len(starts) else e
+        while en > st and not fm_lines[en].strip():
+            en -= 1
+        items.append((st, en))
+    sub_indent = (item_indent + 2) if item_indent is not None else 4
+    return s, e, items, (item_indent or 2), sub_indent
+
+
+def load_raw_for_edit(path: Path):
+    """讀 raw,拒 BOM/CRLF(本 vault 慣例 LF/no-BOM,異常不靜默正規化)。
+    回傳 (all_lines, fm_start, fm_end_exclusive)。fm = all_lines[1:fm_end]。"""
+    raw = path.read_bytes()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise ValueError("T1 不寫 BOM 檔(慣例外),請用 obsidian CLI / 先正規化")
+    if b"\r\n" in raw:
+        raise ValueError("此檔是 CRLF(慣例要求 LF)。Windows 常見=git autocrlf;"
+                         "修:確認 .gitattributes 已套用(vault 標 eol=lf)+ `git add --renormalize .`,"
+                         "或單檔 `dos2unix`。lumos 不靜默改行尾。")
+    lines = raw.decode("utf-8").split("\n")
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("無 frontmatter,T1 不處理")
+    fm_end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            fm_end = i
+            break
+    if fm_end is None:
+        raise ValueError("frontmatter 未閉合")
+    return lines, 1, fm_end
+
+
+def atomic_write_verify(path: Path, new_lines, key, expected_check):
+    """寫 tmp → re-parse 自驗 + lint 無新指紋 → atomic rename。任一步敗:tmp 丟棄,原檔不動。"""
+    orig_fm = load_raw_for_edit(path)
+    orig_lint = set(parse_frontmatter(orig_fm[0][1:orig_fm[2]])[2])
+    text = "\n".join(new_lines)
+    new_fm_lines = new_lines[1:]
+    for i in range(1, len(new_lines)):
+        if new_lines[i].strip() == "---":
+            new_fm_lines = new_lines[1:i]
+            break
+    fields, _, new_lint = parse_frontmatter(new_fm_lines)
+    if not expected_check(fields):
+        raise RuntimeError(f"自驗失敗:{key} 寫入後值不符預期")
+    introduced = set(new_lint) - orig_lint
+    if introduced:
+        raise RuntimeError("自驗失敗:引入新 frontmatter 指紋:" + "; ".join(sorted(introduced)))
+    import os
+    tmp = path.with_suffix(path.suffix + ".lumos-tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def cmd_set(env, rel, key, value):
+    if key not in SCALAR_KEYS:
+        print(f"ERROR: set 白名單={sorted(SCALAR_KEYS)};{key} 不在內"
+              f"(list 用 append;decisions 翻盤/新增用 decision-supersede / decision-add)", file=sys.stderr)
+        return 2
+    path = env.vault / rel
+    lines, s, e = load_raw_for_edit(path)
+    new_fm = edit_fm_scalar(lines[1:e], key, value)
+    new_lines = lines[:1] + new_fm + lines[e:]
+    exp = fmt_scalar(key, value)
+    exp_val = strip_quotes(exp)
+    atomic_write_verify(path, new_lines, key,
+                        lambda f: str(f.get(key, "")) == exp_val)
+    print(f"✓ set {rel}: {key} = {exp}")
+    return 0
+
+
+def cmd_append(env, rel, key, value):
+    if key not in LIST_KEYS:
+        print(f"ERROR: append 白名單={sorted(LIST_KEYS)};{key} 不在內", file=sys.stderr)
+        return 2
+    path = env.vault / rel
+    lines, s, e = load_raw_for_edit(path)
+    new_fm = edit_fm_append(lines[1:e], key, value)
+    new_lines = lines[:1] + new_fm + lines[e:]
+    tgt = link_target(value)
+    atomic_write_verify(path, new_lines, key,
+                        lambda f: any(link_target(x) == tgt for x in as_list(f.get(key))))
+    print(f"✓ append {rel}: {key} += {value}")
+    return 0
+
+
+def _fm_of(all_lines):
+    """從完整檔行抽 frontmatter 行(供 decision 自驗用 parse_decisions 重解)。"""
+    for i in range(1, len(all_lines)):
+        if all_lines[i].strip() == "---":
+            return all_lines[1:i]
+    return all_lines[1:]
+
+
+def _fmt_decision_value(v):
+    """decision 子欄位值格式化(含 ': ' 或特殊字元 → 引號,避鐵則 3)。"""
+    v = v.strip()
+    if re.search(r":\s|^[\[\{>|*&!#@`\"']|^\s|\s$", v) or v == "":
+        return '"' + v.replace('"', '\\"') + '"'
+    return v
+
+
+def cmd_decision_supersede(env, rel, match, by, ended=None):
+    """T3 巢狀手術:把 decisions[] 中 content 含 match 的決策標 valid:false + 補
+    superseded_by/ended。surgical line-based(不重序列化,最小 diff;優於 ruamel reflow)。"""
+    if ended and not DATE_RE.match(ended):
+        raise ValueError(f"--ended 需 YYYY-MM-DD,得到: {ended}")
+    path = env.vault / rel
+    lines, s_fm, e_fm = load_raw_for_edit(path)
+    fm = lines[1:e_fm]
+    loc = decisions_items(fm)
+    if loc is None:
+        raise ValueError("此筆記無 decisions")
+    if not loc[2]:  # block 存在但解析不到項目(Bug2:0-indent / 非標準縮排)
+        raise ValueError("decisions 區塊解析不到項目(本工具要求 2-space 縮排,不支援 0-indent/tab)")
+    _, _, items, _, sub = loc
+    needle = nfc(match)
+    target = None
+    for (st, en) in items:
+        if needle in nfc("\n".join(fm[st:en + 1])):
+            target = (st, en)
+            break
+    if target is None:
+        raise ValueError(f"找不到 content 含「{match}」的決策")
+    st, en = target
+    pad = " " * sub
+    valid_line = None
+    for i in range(st, en + 1):
+        if re.match(rf"^{pad}valid:\s", fm[i]):   # 只認精確 sub_indent(Bug5:移除過寬 fallback,免誤命中子清單)
+            valid_line = i
+            break
+    if valid_line is None:
+        raise ValueError("該決策無 valid 欄位(或縮排非標準 2-space),T3 不自動 supersede(請手動 / 確認結構)")
+    # Bug3: 已 superseded 不重插(免重複鍵)。同 sub_indent 已有 superseded_by → 拒
+    for i in range(st, en + 1):
+        if re.match(rf"^{pad}superseded_by:\s", fm[i]):
+            raise ValueError("該決策已有 superseded_by(已翻盤過),不重複 supersede;要改取代者請手動編輯")
+    fm[valid_line] = f"{pad}valid: false"
+    ins = [f"{pad}superseded_by: {_fmt_decision_value(by)}"]
+    if ended:
+        ins.append(f"{pad}ended: {ended}")
+    fm[valid_line + 1:valid_line + 1] = ins
+    new_lines = lines[:1] + fm + lines[e_fm:]
+
+    def _check(_fields):
+        for d in parse_decisions(_fm_of(new_lines)):
+            if needle in nfc(str(d.get("content", ""))):
+                return str(d.get("valid", "")).lower() == "false" and "superseded_by" in d
+        return False
+    atomic_write_verify(path, new_lines, "decisions", _check)
+    print(f"✓ supersede {rel}: 決策「{match[:30]}」→ valid:false + superseded_by")
+    return 0
+
+
+def cmd_decision_add(env, rel, content, decided, context=None, why=None):
+    """T3 巢狀手術:append 一條新 ADR 決策到 decisions[](無則建)。surgical line-based。"""
+    if not DATE_RE.match(decided):
+        raise ValueError(f"--decided 需 YYYY-MM-DD,得到: {decided}")
+    path = env.vault / rel
+    lines, s_fm, e_fm = load_raw_for_edit(path)
+    fm = lines[1:e_fm]
+    loc = decisions_items(fm)
+    if loc is None:
+        # 無 decisions key → 在 fm 末尾建
+        item_indent, sub = 2, 4
+        block = [f'{" "*item_indent}- content: {_fmt_decision_value(content)}']
+        if context:
+            block.append(f'{" "*sub}context: {_fmt_decision_value(context)}')
+        if why:
+            block.append(f'{" "*sub}why_chosen: {_fmt_decision_value(why)}')
+        block += [f"{' '*sub}decided: {decided}", f"{' '*sub}valid: true"]
+        fm = fm + ["decisions:"] + block
+    else:
+        _, e_block, items, item_indent, sub = loc
+        ip, sp = " " * item_indent, " " * sub
+        block = [f"{ip}- content: {_fmt_decision_value(content)}"]
+        if context:
+            block.append(f"{sp}context: {_fmt_decision_value(context)}")
+        if why:
+            block.append(f"{sp}why_chosen: {_fmt_decision_value(why)}")
+        block += [f"{sp}decided: {decided}", f"{sp}valid: true"]
+        last = items[-1][1] if items else e_block
+        fm[last + 1:last + 1] = block
+    new_lines = lines[:1] + fm + lines[e_fm:]
+    needle = nfc(content)
+
+    def _check(_fields):
+        return any(needle in nfc(str(d.get("content", "")))
+                   for d in parse_decisions(_fm_of(new_lines)))
+    atomic_write_verify(path, new_lines, "decisions", _check)
+    print(f"✓ decision-add {rel}: 「{content[:30]}」(valid:true)")
+    return 0
+
+
+TEMPLATES = {
+    "system": ("Systems", "type: system\nstatus: doing\ncreated: {today}\nupdated: {today}\n"
+               "tags:\n  - type/system\n  - status/doing\nsummary: |-\n  FLOW:\n  KEY:\n  DEP:"),
+    "verification": ("Verification", "type: verification\nstatus: pass\ndate: {today}\n"
+                     "valid_under:\nrevalidate_when:\ntags:\n  - type/verification\n  - status/pass"),
+    "issue": ("Issues", "type: issue\nstatus: open\ncreated: {today}\nupdated: {today}\n"
+              "tags:\n  - type/issue\n  - status/open\nsummary: |-\n  FLAG:\n  KEY:"),
+    "project": ("Projects", "type: project\nstatus: doing\ncreated: {today}\nupdated: {today}\n"
+                "tags:\n  - type/project\n  - status/doing"),
+}
+
+
+def cmd_new(env, ntype, name, today):
+    if ntype not in TEMPLATES:
+        print(f"ERROR: type 須為 {sorted(TEMPLATES)}", file=sys.stderr)
+        return 2
+    if "/" in name or "\\" in name or ".." in name or name.startswith("."):
+        print(f"ERROR: name 不得含路徑分隔符 / .. / 開頭點(防路徑逃脫): {name}", file=sys.stderr)
+        return 2
+    folder, tmpl = TEMPLATES[ntype]
+    path = env.vault / folder / f"{name}.md"
+    if path.exists():
+        print(f"ERROR: 已存在: {path}", file=sys.stderr)
+        return 2
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fm = tmpl.format(today=today)
+    path.write_text(f"---\n{fm}\n---\n# {name}\n", encoding="utf-8")
+    print(f"✓ new {ntype}: {path.relative_to(env.vault)}")
+    return 0
+
+
+# ═══════════════════════ 階段三: archive(lumos 自做,單遍) ═══════════════════════
+
+ARCHIVABLE = {"pass", "done", "superseded"}
+
+
+def cmd_archive(env, days, apply, today):
+    import os
+    import datetime
+    cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=days)).isoformat()
+
+    # 「活守衛護欄」:一份 Verification 若還在提到某條 ★INVARIANT★ 綁定、且該測試仍存在於 code 的守衛,
+    # 它的有效性是 CI 每次真機跑出來證明的、不是日曆決定的 → 不按年齡歸檔(否則把還在跑綠的守衛證據
+    # 降級進 Archive,等於歸檔規則[天數]凌駕有效性規則[CI 綠燈])。守衛若被刪(測試不在 code)則照舊可歸檔。
+    repo_root = None
+    for p in env.vault.parents:
+        if p.name == "docs":
+            repo_root = p.parent
+            break
+    live_guard_tests = set()
+    guard_re = None
+    if repo_root is not None:
+        bound = set()
+        for _n in env.notes.values():
+            invs, _ = extract_contracts(_n)
+            for inv in invs:
+                bound.update(invariant_test_refs(inv))
+        methods = discover_test_methods(repo_root)
+        live_guard_tests = {name for name in bound if name in methods}
+        if live_guard_tests:
+            # 精確度對齊 Check T:用【詞界】比對方法名,不是 raw 子字串。
+            # 否則短/前綴名(live `Pay` 命中散文 "Payment"、`Foo` 命中 `FooBar`)會
+            # 假性護住無關 Verification → 它們永遠不歸檔(歸檔靜默失效)。
+            # re.ASCII:方法名是 ASCII 識別字;否則 Python \b 視 CJK 為 \w,
+            # 「守衛Pay跑」(中文緊貼方法名無空格)→ \b 不成立 → 漏護(under-protection,更危險)。
+            guard_re = re.compile(r"\b(?:" + "|".join(map(re.escape, live_guard_tests)) + r")\b",
+                                  re.ASCII)
+    guards_all_dead = repo_root is not None and not live_guard_tests and any(
+        invariant_test_refs(inv)
+        for _n in env.notes.values() for inv in extract_contracts(_n)[0])
+
+    cands = []       # (rel, stem, ym)
+    protected = []   # (rel, [backs...]):早於 cutoff 但仍背書存活守衛
+    for rel, n in sorted(env.notes.items()):
+        if not rel.startswith("Verification/") or "/Archive/" in rel:
+            continue
+        if str(n.fields.get("status", "")) not in ARCHIVABLE:
+            continue
+        datestr = str(n.fields.get("created") or n.fields.get("date") or "")[:10]
+        if not DATE_RE.match(datestr) or datestr > cutoff:
+            continue
+        # 活守衛護欄:這篇是否【詞界】提到任一條「測試仍存在」的綁定名 → 是則保留不歸檔
+        if guard_re is not None:
+            try:
+                raw = (env.vault / rel).read_text(encoding="utf-8-sig")
+            except Exception:
+                raw = ""
+            backs = sorted(set(guard_re.findall(raw)))
+            if backs:
+                protected.append((rel, backs))
+                continue
+        cands.append((rel, n.stem, datestr[:7]))
+
+    print(f"lumos archive — vault: {env.vault}")
+    print(f"  cutoff: {cutoff} (--days {days})  mode: {'APPLY' if apply else 'DRY-RUN(--apply 真執行)'}")
+    if repo_root is None:
+        print("  ⚠ 無法定位 repo root → 活守衛護欄停用(本次純按年齡歸檔)")
+    if guards_all_dead:
+        print("  ⚠ ★INVARIANT★ 綁定的測試都不在 code(守衛已刪/裸合約)→ 活守衛護欄本次停用"
+              "(0 受護 ≠ 全部都能放心歸檔)")
+    if protected:
+        print(f"  活守衛護欄:{len(protected)} 篇早於 cutoff 但仍背書存活守衛(綁定測試還在 code)→ 保留不歸檔")
+        for rel, backs in protected:
+            print(f"      • {rel}  (backs: {', '.join(backs)})")
+    print()
+    if not cands:
+        print("  無符合條件的 Verification(status∈{pass,done,superseded} 且早於 cutoff;已扣除活守衛護欄保留者)")
+        return 0
+
+    moved_stems = {stem for _, stem, _ in cands}
+    # 計算每個被移檔的 path 式入連結(body + frontmatter 字串一起,raw text 掃)
+    rewrite_plan = defaultdict(list)  # rel → [stem,...] 該檔內要正規化的 path 式連結
+    for rel, n in env.notes.items():
+        try:
+            text = (env.vault / rel).read_text(encoding="utf-8-sig")
+        except Exception:
+            continue
+        for stem in moved_stems:
+            if re.search(r"\[\[Verification/" + re.escape(stem) + r"(?=[\]|#])", text):
+                rewrite_plan[rel].append(stem)
+
+    print(f"  將歸檔 {len(cands)} 篇:")
+    for rel, stem, ym in cands:
+        print(f"    • {rel} → Verification/Archive/{ym}/{stem}.md")
+    n_links = sum(len(v) for v in rewrite_plan.values())
+    print(f"\n  path 式入連結正規化(→ basename): {n_links} 處,分佈 {len(rewrite_plan)} 檔")
+    for rel, stems in sorted(rewrite_plan.items()):
+        print(f"    • {rel}: {', '.join(stems)}")
+    if not apply:
+        print("\n  (DRY-RUN,未動檔。basename 式入連結不受影響=移檔不斷)")
+        return 0
+
+    # 1) 先正規化連結(檔案還在原位)。順序=先 rewrite 後移檔:若中途失敗,
+    #    已 rewrite 未移檔的檔其 basename 連結仍解析得到(檔還在 Verification/),狀態良性;
+    #    且 re-run archive 會跳過已正規化的(無 path 式可改)只補移檔 → 可重入恢復。
+    rewritten = 0  # 實際改寫處數(非計畫數;CRLF 跳過時不灌水,GAP-4)
+    for rel, stems in sorted(rewrite_plan.items()):
+        p = env.vault / rel
+        raw = p.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf") or b"\r\n" in raw:
+            print(f"  ⚠ 跳過 rewrite(BOM/CRLF 慣例外,不靜默正規化): {rel}", file=sys.stderr)
+            continue
+        text = raw.decode("utf-8")
+        for stem in stems:
+            text, n_sub = re.subn(r"\[\[Verification/" + re.escape(stem) + r"(?=[\]|#])",
+                                  "[[" + stem, text)
+            rewritten += n_sub
+        tmp = p.with_suffix(p.suffix + ".lumos-tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, p)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+    # 2) 移檔
+    moved = 0
+    for rel, stem, ym in cands:
+        src = env.vault / rel
+        dst_dir = env.vault / "Verification" / "Archive" / ym
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / f"{stem}.md"
+        if dst.exists():
+            print(f"  ⚠ 跳過(目標已存在): {dst}", file=sys.stderr)
+            continue
+        os.replace(src, dst)
+        moved += 1
+    print(f"\n  ✓ 歸檔 {moved} 篇,正規化 {rewritten} 處連結(計畫 {n_links})")
+    return 0
+
+
+# ═══════════════════════ main ═══════════════════════
+
+def cmd_install(force=False):
+    """symlink 本腳本到 ~/.local/bin/lumos → 全域可用(任何專案目錄 cwd 找 vault)。
+    用 symlink 不 copy:單一真值來源(repo 那份),git pull 自動更新,無 drift。"""
+    import os
+    src = Path(__file__).resolve()
+    bindir = Path.home() / ".local" / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    dst = bindir / "lumos"
+    if dst.is_symlink() and dst.resolve() == src:
+        print(f"✓ 已安裝(symlink 正確): {dst} → {src}")
+    elif dst.exists() or dst.is_symlink():
+        if not force:
+            cur = str(dst.resolve()) if dst.is_symlink() else "(一般檔案)"
+            print(f"⚠ {dst} 已存在(→ {cur}),加 --force 覆寫", file=sys.stderr)
+            return 2
+        dst.unlink()
+        dst.symlink_to(src)
+        print(f"✓ 覆寫安裝: {dst} → {src}")
+    else:
+        dst.symlink_to(src)
+        print(f"✓ 安裝: {dst} → {src}")
+    if str(bindir) not in os.environ.get("PATH", "").split(":"):
+        print(f"⚠ {bindir} 不在當前 PATH — 加到 shell rc: "
+              f'export PATH="$HOME/.local/bin:$PATH"', file=sys.stderr)
+    else:
+        print(f"  {bindir} 已在 PATH — 任何專案目錄打 `lumos doctor` 即可")
+    print("  注意: doctrine 檢查(verified_by/plan_refs)假設本套圖譜慣例;"
+          "通用檢查(破連結/lint/讀取)任何 vault 適用")
+    return 0
+
+
+def cmd_uninstall():
+    dst = Path.home() / ".local" / "bin" / "lumos"
+    if dst.is_symlink():
+        target = dst.resolve()
+        dst.unlink()
+        print(f"✓ 移除 symlink: {dst}(原指向 {target})")
+        return 0
+    if dst.exists():
+        print(f"⚠ {dst} 是一般檔案非 symlink,未動(手動處理)", file=sys.stderr)
+        return 2
+    print(f"✓ 未安裝({dst} 不存在)")
+    return 0
+
+
+def cmd_update(source=None, no_pull=False):
+    """從 Lumos 唯一源 repo 更新「本專案」vendored 的工具組。
+    = (git pull Lumos) + install-graph-toolchain --target <本專案> --slug <自動偵測>。
+    圖譜資料受 install-graph-toolchain 的 scaffold-skip 保護,不會被動。"""
+    import os, subprocess
+    src = Path(source or os.environ.get("LUMOS_HOME")
+               or (Path.home() / "harness" / "lumos-toolchain")).expanduser()
+    installer = src / "scripts" / "install-graph-toolchain.sh"
+    if not installer.exists():
+        print(f"ERROR: 找不到 Lumos 來源 {src}（無 scripts/install-graph-toolchain.sh）\n"
+              f"  用 --source <path> 指定、設 $LUMOS_HOME、或 clone 到 ~/harness/lumos-toolchain",
+              file=sys.stderr)
+        return 2
+    vault = find_vault(Path.cwd())
+    if vault is None:
+        print("ERROR: 當前目錄找不到 docs/*-knowledge 專案 vault", file=sys.stderr)
+        return 2
+    root = vault.parent.parent  # docs/<slug>-knowledge → docs → 專案 root
+    slug = vault.name[:-len("-knowledge")] if vault.name.endswith("-knowledge") else vault.name
+    if root.resolve() == src.resolve():
+        print("ERROR: 當前就是 Lumos 來源本身,不需 update", file=sys.stderr)
+        return 2
+    print(f"lumos update — 來源 {src} → 本專案 {root}（slug={slug}）")
+    if not no_pull:
+        if (src / ".git").is_dir():
+            print("  git pull 來源(取最新工具組)…")
+            if subprocess.run(["git", "-C", str(src), "pull", "--ff-only"]).returncode != 0:
+                print("  ⚠ git pull 失敗(無 remote / 非 ff),用現有來源繼續", file=sys.stderr)
+        else:
+            print("  (來源非 git repo,跳過 pull)")
+    rc = subprocess.run(["bash", str(installer), "--target", str(root), "--slug", slug]).returncode
+    # 結尾 diff 自癒:install-graph-toolchain.sh 執行中無法覆寫自己(bash 自我複製不可靠),
+    # 其他檔偶有漏。python 端逐檔比對 src↔target,差異即補(python 非該 bash 腳本,可安全覆寫)。
+    import shutil, filecmp
+    toolkit = ["scripts/lumos", "scripts/test_lumos.py", "scripts/install-hooks.sh",
+               "scripts/install-graph-toolchain.sh", "scripts/merge-claude-settings.py",
+               "scripts/graph-rename.sh", "scripts/fetch-notesmd.sh"]
+    for sub in ("scripts/hooks", "scripts/templates"):
+        base = src / sub
+        if base.is_dir():
+            toolkit += [str(p.relative_to(src)) for p in base.rglob("*") if p.is_file()]
+    healed = []
+    for rel in toolkit:
+        s, t = src / rel, root / rel
+        if not s.exists():
+            continue
+        if (not t.exists()) or not filecmp.cmp(s, t, shallow=False):
+            t.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(s, t)
+            if s.stat().st_mode & 0o111:
+                t.chmod(t.stat().st_mode | 0o111)
+            healed.append(rel)
+    if healed:
+        print(f"  結尾自癒:補齊 installer 漏的 {len(healed)} 檔 → {', '.join(healed)}")
+    else:
+        print("  ✓ 結尾自癒檢查:工具組完全對齊(無漏)")
+    return rc
+
+
+def cmd_bootstrap(lumos_url=None, lumos_home=None, pull=False):
+    """一鍵在專案內裝好一切:自動 clone Lumos(若缺)→ user-scope skills → 全域 lumos → repo hooks。
+    給「剛 clone 專案、機器還沒設定」的同事:cd 進專案打 `python3 scripts/lumos bootstrap` 即可,
+    連 Lumos 都不用先手動 clone(專案自帶 vendored lumos 來跑這個)。
+    --pull:既有 Lumos clone 也 git pull 拉最新(否則已存在就沿用,拿不到 skills 更新)。"""
+    import os, subprocess
+    home = Path(lumos_home or os.environ.get("LUMOS_HOME")
+                or (Path.home() / "harness" / "lumos-toolchain")).expanduser()
+    url = lumos_url or os.environ.get("LUMOS_URL") or "https://github.com/EnzoHsieh-Android/Lumos"
+    # 1) 確保 Lumos 來源在(缺則自動 clone;--pull 則既有 clone 也拉最新)
+    if (home / "install.sh").exists():
+        if pull:
+            print(f"[1/4] Lumos 來源已在,git pull 更新: {home}")
+            if subprocess.run(["git", "-C", str(home), "pull", "--ff-only"]).returncode != 0:
+                print(f"WARN: git pull 失敗(來源有本機改動?),沿用現有 clone", file=sys.stderr)
+        else:
+            print(f"[1/4] Lumos 來源已在: {home}（--pull 可拉最新 skills）")
+    else:
+        print(f"[1/4] clone Lumos → {home} …")
+        home.parent.mkdir(parents=True, exist_ok=True)
+        if subprocess.run(["git", "clone", url, str(home)]).returncode != 0:
+            print(f"ERROR: clone 失敗。手動 `git clone {url} {home}` 後重試", file=sys.stderr)
+            return 2
+    # 2) user-scope skills(symlink ~/.claude/skills/lumos-*)
+    print("[2/4] 裝 user-scope skills…")
+    subprocess.run(["bash", str(home / "install.sh")])
+    # 3) 全域 lumos → 指向 Lumos 來源(非 vendored copy)
+    print("[3/4] 裝全域 lumos…")
+    subprocess.run([sys.executable, str(home / "scripts" / "lumos"), "install", "--force"])
+    # 4) 本 repo hooks(git toplevel)
+    try:
+        root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    except Exception:
+        root = Path.cwd()
+    hooks = root / "scripts" / "install-hooks.sh"
+    if hooks.exists():
+        print(f"[4/4] 裝 repo hooks（{root}）…")
+        subprocess.run(["bash", str(hooks), "--force"], cwd=str(root))
+    else:
+        print(f"[4/4] ⚠ 找不到 {hooks}（此專案無 vendored 工具組?）,跳過 hooks", file=sys.stderr)
+    print("\n✓ bootstrap 完成。最後一步:**重啟 Claude Code session**(L1/L3 hooks 要 session start 才載入)。")
+    return 0
+
+
+def _vault_in(d: Path):
+    """d 之下是否有 vault: docs/*-knowledge 或 docs/knowledge(專案佈局),
+    或 d 本身就是 vault root(standalone,如核心 repo:有 MOC/ + Verification|Systems)。"""
+    docs = d / "docs"
+    if docs.is_dir():
+        for sub in sorted(docs.iterdir()):
+            if sub.is_dir() and sub.name.endswith("-knowledge"):
+                return sub
+        if (docs / "knowledge").is_dir():
+            return docs / "knowledge"
+    # standalone vault root(核心 repo 等):MOC/ + (Verification/ 或 Systems/)
+    if (d / "MOC").is_dir() and ((d / "Verification").is_dir() or (d / "Systems").is_dir()):
+        return d
+    return None
+
+
+def find_vault(start: Path):
+    """從 cwd 往上走找 vault(全域安裝後可從任何專案子目錄跑)。"""
+    start = start.resolve()
+    for d in [start, *start.parents]:
+        v = _vault_in(d)
+        if v is not None:
+            return v
+        if (d / ".git").exists():  # 到 repo 根還沒找到就停(別爬出專案)
+            break
+    return None
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="lumos", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--vault", type=Path, default=None,
+                    help="vault 路徑 (預設自動找 docs/*-knowledge)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    d = sub.add_parser("doctor", help="圖譜健康巡檢")
+    d.add_argument("--strict", action="store_true", help="有 finding 即 exit 1 (CI 用)")
+    d.add_argument("--ci", action="store_true", help="CI 模式 = --strict + 無色彩")
+    d.add_argument("--suggest", action="store_true",
+                   help="orphan Verification 附推薦掛載 Systems(從正文連結/plan_refs/feature 推斷,供人確認)")
+
+    for name, hlp in (("links", "連出的節點"), ("backlinks", "連入的節點")):
+        p = sub.add_parser(name, help=hlp)
+        p.add_argument("note")
+
+    p = sub.add_parser("context", help="節點+鄰居壓縮索引")
+    p.add_argument("note")
+    p.add_argument("--brief", action="store_true", help="壓縮版(meta+summary 首兩行+鄰居名單)")
+
+    p = sub.add_parser("contracts", help="合約登記簿 ★INVARIANT★/★DEBT★(全 vault 或單節點)")
+    p.add_argument("note", nargs="?")
+
+    g = sub.add_parser("guard", help="合約守衛 scaffold(對談驅動):列出未綁 / 套範本產 stub / 綁定")
+    gsub = g.add_subparsers(dest="gcmd", required=True)
+    gl = gsub.add_parser("list", help="列 ★INVARIANT★ 綁定狀態(real/dangling/fake/naked)")
+    gl.add_argument("--unbound", action="store_true", help="只列未綁(懸空/偽證據/裸)")
+    gs = gsub.add_parser("scaffold", help="套範本產測試 stub(預設紅燈,斷言留 TODO)")
+    gs.add_argument("--node", required=True, help="守衛的 Systems 節點")
+    gs.add_argument("--invariant", required=True, help="KEY 行子字串(定位該合約)")
+    gs.add_argument("--method", required=True, help="測試方法名(= [test:] 認領名)")
+    gs.add_argument("--type", required=True, choices=list(GUARD_TYPES))
+    gs.add_argument("--claim", required=True, help="向人確認過的可測斷言(白話,寫進 stub 註解)")
+    gs.add_argument("--out", help="測試專案目錄(預設自動偵測 *Tests / *IntegrationTests)")
+    gs.add_argument("--template", help="範本路徑(預設 .lumos/guard-templates/<type>.tmpl)")
+    gs.add_argument("--class", dest="klass", help="測試類別名(預設 <method>Tests)")
+    gb = gsub.add_parser("bind", help="把 [test:方法] 綁回 KEY 行(寫後自驗)")
+    gb.add_argument("node")
+    gb.add_argument("invariant", help="KEY 行子字串")
+    gb.add_argument("method")
+    gt = gsub.add_parser("trace", help="合約→守衛測試→Verification 證據鏈(reverse:爆炸半徑可查)")
+    gt.add_argument("node", nargs="?", help="限單節點(預設全 vault)")
+
+    p = sub.add_parser("sync-verified-by", help="補 Check 3 漏寫的 verified_by(dry-run 預設)")
+    p.add_argument("--apply", action="store_true", help="真寫入(否則 dry-run 只列)")
+
+    p = sub.add_parser("search", help="全文搜尋(frontmatter+body);取代 obsidian search")
+    p.add_argument("term")
+    p.add_argument("--path", dest="path_prefix", help="限資料夾前綴(如 Systems)")
+    p.add_argument("--regex", action="store_true", help="term 當正則(預設 substring 大小寫不敏感)")
+    p.add_argument("--files-only", action="store_true", help="只列檔名+命中數")
+    p.add_argument("--code", action="store_true", help="含 code block(預設排除,對齊 doctor)")
+
+    p = sub.add_parser("map", help="鄰域樹狀展開")
+    p.add_argument("note")
+    p.add_argument("--depth", type=int, default=2)
+
+    p = sub.add_parser("decisions", help="讀取 ADR 決策")
+    p.add_argument("note", nargs="?")
+    p.add_argument("--superseded", action="store_true", help="全 vault 掃被推翻的決策")
+
+    p = sub.add_parser("stale", help="stale 驗證 / 條件命中掃描 / --candidate 列待覆查清單")
+    p.add_argument("--match", help="掃 valid_under/revalidate_when 含此字串的驗證")
+    p.add_argument("--candidate", action="store_true",
+                   help="(須配 --match)聚焦:活躍+revalidate_when 提到該關鍵字、排 Archive — "
+                        "「改 X 流程該重驗哪幾篇」;比純 --match 窄(只看 revalidate_when 不看 valid_under)")
+
+    p = sub.add_parser("recent", help="最近 N 天修改的筆記")
+    p.add_argument("--days", type=int, default=7)
+
+    sub.add_parser("stats", help="資料夾統計")
+
+    p = sub.add_parser("export", help="輸出圖(mermaid/dot 文字;html=互動語意視圖)")
+    p.add_argument("--format", choices=("mermaid", "dot", "html"), default="mermaid")
+    p.add_argument("--folders", nargs="+", default=["Systems", "Projects", "Issues", "MOC"])
+    p.add_argument("--output", default="graph.html", help="html 輸出檔(預設 graph.html)")
+    p.add_argument("--standalone", action="store_true", help="html 內聯 cytoscape/marked(去 CDN,離線/防火牆可開)")
+
+    # T1 寫側(行級手術,寫後自驗 atomic)
+    p = sub.add_parser("set", help="改純量欄位(status/updated/created/type)")
+    p.add_argument("note")
+    p.add_argument("key")
+    p.add_argument("value")
+    p = sub.add_parser("append", help="list 欄位追加(verified_by/plan_refs/related/tags)")
+    p.add_argument("note")
+    p.add_argument("key")
+    p.add_argument("value")
+    p = sub.add_parser("new", help="依模板建檔")
+    p.add_argument("type", choices=("system", "verification", "issue", "project"))
+    p.add_argument("name")
+
+    p = sub.add_parser("decision-supersede", help="T3 巢狀:翻盤一條決策(valid:false+superseded_by)")
+    p.add_argument("note")
+    p.add_argument("match", help="決策 content 子字串(定位要翻盤的那條)")
+    p.add_argument("--by", required=True, help="被誰取代(superseded_by 值)")
+    p.add_argument("--ended", help="失效日期 YYYY-MM-DD(選填)")
+
+    p = sub.add_parser("decision-add", help="T3 巢狀:新增一條 ADR 決策")
+    p.add_argument("note")
+    p.add_argument("content")
+    p.add_argument("--decided", required=True, help="決策日期 YYYY-MM-DD")
+    p.add_argument("--context", help="背景/痛點")
+    p.add_argument("--why", help="why_chosen 為何選這個")
+
+    p = sub.add_parser("install", help="symlink 到 ~/.local/bin → 全域可用")
+    p.add_argument("--force", action="store_true", help="覆寫既有")
+    sub.add_parser("uninstall", help="移除 ~/.local/bin/lumos symlink")
+    p = sub.add_parser("archive", help="滾動歸檔老 Verification(單遍,移檔+path連結正規化)")
+    p.add_argument("--days", type=int, default=180)
+    p.add_argument("--apply", action="store_true", help="真執行(預設 dry-run)")
+    p = sub.add_parser("update", help="從 Lumos 唯一源更新本專案 vendored 工具組")
+    p.add_argument("--source", help="Lumos 來源 repo 路徑(預設 $LUMOS_HOME 或 ~/harness/lumos-toolchain)")
+    p.add_argument("--no-pull", action="store_true", help="不 git pull 來源,用現有")
+    p = sub.add_parser("bootstrap", help="一鍵裝好一切(自動 clone Lumos + skills + 全域 + repo hooks)")
+    p.add_argument("--lumos-url", help="Lumos repo URL(預設公開 repo / $LUMOS_URL)")
+    p.add_argument("--lumos-home", help="Lumos clone 目標(預設 ~/harness/lumos-toolchain / $LUMOS_HOME)")
+    p.add_argument("--pull", action="store_true", help="既有 Lumos clone 也 git pull 拉最新(預設沿用)")
+
+    args = ap.parse_args()
+
+    # install/uninstall/update/bootstrap 不需要 Env(vault),先處理
+    if args.cmd == "install":
+        return cmd_install(force=args.force)
+    if args.cmd == "uninstall":
+        return cmd_uninstall()
+    if args.cmd == "update":
+        return cmd_update(source=args.source, no_pull=args.no_pull)
+    if args.cmd == "bootstrap":
+        return cmd_bootstrap(lumos_url=args.lumos_url, lumos_home=args.lumos_home, pull=args.pull)
+
+    vault = args.vault or find_vault(Path.cwd())
+    if vault is None or not vault.is_dir():
+        print("ERROR: 找不到 vault (docs/*-knowledge),可用 --vault 指定", file=sys.stderr)
+        return 2
+    env = Env(vault)
+
+    if args.cmd == "doctor":
+        color = sys.stdout.isatty() and not args.ci
+        return run_doctor(env, strict=(args.strict or args.ci), color=color, suggest=args.suggest)
+
+    if args.cmd in ("links", "backlinks", "context", "map") or \
+       (args.cmd == "decisions" and not args.superseded):
+        rel = env.find(getattr(args, "note", None) or "")
+        if rel is None:
+            print(f"ERROR: 找不到筆記: {args.note}", file=sys.stderr)
+            return 2
+        if args.cmd == "links":
+            return cmd_links(env, rel)
+        if args.cmd == "backlinks":
+            return cmd_links(env, rel, reverse=True)
+        if args.cmd == "context":
+            return cmd_context(env, rel, brief=args.brief)
+        if args.cmd == "map":
+            return cmd_map(env, rel, args.depth)
+        return cmd_decisions(env, rel)
+
+    if args.cmd == "search":
+        return cmd_search(env, args.term, path_prefix=args.path_prefix,
+                          regex=args.regex, files_only=args.files_only,
+                          include_code=args.code)
+
+    if args.cmd == "contracts":
+        rel = None
+        if args.note:
+            rel = env.find(args.note)
+            if rel is None:
+                print(f"ERROR: 找不到筆記: {args.note}", file=sys.stderr)
+                return 2
+        return cmd_contracts(env, rel)
+
+    if args.cmd == "guard":
+        if args.gcmd == "list":
+            return cmd_guard_list(env, unbound_only=args.unbound)
+        if args.gcmd == "scaffold":
+            return cmd_guard_scaffold(env, args.node, args.invariant, args.method,
+                                      args.type, args.claim, out_dir=args.out,
+                                      template=args.template, klass=args.klass)
+        if args.gcmd == "bind":
+            return cmd_guard_bind(env, args.node, args.invariant, args.method)
+        if args.gcmd == "trace":
+            return cmd_guard_trace(env, args.node)
+
+    if args.cmd == "sync-verified-by":
+        return cmd_sync_verified_by(env, apply=args.apply)
+
+    if args.cmd == "decisions":
+        return cmd_decisions(env, superseded=True)
+    if args.cmd == "stale":
+        return cmd_stale(env, match=args.match, candidate=args.candidate)
+    if args.cmd == "recent":
+        return cmd_recent(env, args.days)
+    if args.cmd == "stats":
+        return cmd_stats(env)
+    if args.cmd == "export":
+        if args.format == "html":
+            return cmd_export_html(env, args.output, standalone=args.standalone)
+        return cmd_export(env, args.format, set(args.folders))
+
+    # T1 寫側
+    if args.cmd in ("set", "append"):
+        rel = env.find(args.note)
+        if rel is None:
+            print(f"ERROR: 找不到筆記: {args.note}", file=sys.stderr)
+            return 2
+        try:
+            if args.cmd == "set":
+                return cmd_set(env, rel, args.key, args.value)
+            return cmd_append(env, rel, args.key, args.value)
+        except (ValueError, RuntimeError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+    if args.cmd == "new":
+        import datetime
+        try:
+            return cmd_new(env, args.type, args.name, datetime.date.today().isoformat())
+        except (ValueError, RuntimeError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+    if args.cmd in ("decision-supersede", "decision-add"):
+        rel = env.find(args.note)
+        if rel is None:
+            print(f"ERROR: 找不到筆記: {args.note}", file=sys.stderr)
+            return 2
+        try:
+            if args.cmd == "decision-supersede":
+                return cmd_decision_supersede(env, rel, args.match, args.by, ended=args.ended)
+            return cmd_decision_add(env, rel, args.content, args.decided,
+                                    context=args.context, why=args.why)
+        except (ValueError, RuntimeError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+    if args.cmd == "archive":
+        import datetime
+        return cmd_archive(env, args.days, args.apply, datetime.date.today().isoformat())
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

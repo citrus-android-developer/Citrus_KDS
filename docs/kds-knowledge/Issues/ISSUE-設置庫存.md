@@ -4,7 +4,11 @@ status: doing
 priority: P1
 created: 2026-06-05
 updated: 2026-06-05
-related: "[[SetStockPage]], [[POS-API端點]], [[Prefs偏好設定]], [[設定頁]]"
+related:
+  - "[[SetStockPage]]"
+  - "[[POS-API端點]]"
+  - "[[Prefs偏好設定]]"
+  - "[[設定頁]]"
 summary: |-
   FLAG:ROOTCAUSE,DECISION | 設置庫存點擊全錯(400/伺服器忙碌中)
   KEY:三層問題-(1)前端送空Gname被[Required]擋400(2)後端寫不存在的ProductBoutique/Store→伺服器忙碌中,改寫SoldOutItem(3)serverUrl誤設本地應指雲端後台UAT

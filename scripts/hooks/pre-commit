@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Git pre-commit hook — 圖譜同步硬擋 (L2)
+#
+# 設計理由 (2026-05-25 從 PreToolUse 搬家):
+#   舊版 L2 在 Claude Code PreToolUse 攔 `git commit`,但 staged 區在 -a/-am
+#   flag 跟 `git commit <path>` 場景下 hook 看到的是空的 (因 -a 在 git 程序內
+#   部才 stage), 造成 silent 漏網。教 PreToolUse 解 git command 是追 git 尾巴
+#   永遠補不完,根因是「攔截點不對」。改放到 git pre-commit hook,git 內部
+#   已決定最終 staged 內容,所有 commit 形態(-a/-am/<path>/--amend)都涵蓋。
+#
+# Bypass: 用業界標準 `git commit --no-verify` (有儀式感、code review 看得到、
+#         比自製 `[no-graph]` marker 難被無意識濫用)
+#
+# 安裝:
+#   git config core.hooksPath scripts/hooks
+#   (一次設定,之後 git 自動跑此 hook)
+
+set -u
+
+# 找專案 root (避免在 submodule / worktree 出錯)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 0
+
+# 找圖譜目錄 (docs/{slug}-knowledge/)
+GRAPH_ROOT=""
+if [[ -d docs ]]; then
+  for d in docs/*-knowledge; do
+    [[ -d "$d" ]] && GRAPH_ROOT="$d" && break
+  done
+  [[ -z "$GRAPH_ROOT" && -d docs/knowledge ]] && GRAPH_ROOT="docs/knowledge"
+fi
+
+# Gate 0: 圖譜不存在 → 放行
+[[ -z "$GRAPH_ROOT" ]] && exit 0
+
+# 拿最終 staged (git 在 pre-commit 時 staged 已確定,-a/-am/path 都涵蓋)
+# core.quotePath=off: 避免 git 對中文/non-ASCII 路徑加雙引號 ("docs/.../節點.md"),
+# 否則 L65 grep "^${GRAPH_ROOT}/..." 比對不到 → 圖譜檔已 staged 仍誤判為未同步擋下
+STAGED="$(git -c core.quotePath=off diff --cached --name-only)"
+[[ -z "$STAGED" ]] && exit 0  # 空 commit 不擋
+
+# Gate 1: 圖譜污染指紋 (2026-06-13 對抗審計 P0)
+# 攔 notesmd-cli `frontmatter --edit` 的副作用: 日期欄位加引號 (Obsidian property
+# 型別 date→text 靜默損傷,且通常伴隨整篇 frontmatter 鍵序重排)。
+# 必須放在 Gate 2 之前 — 污染 commit 是 docs-only,Gate 2 的 code 判定對它直接放行。
+if echo "$STAGED" | grep -qE "^${GRAPH_ROOT}/.*\.md$"; then
+  polluted="$(git -c core.quotePath=off diff --cached -- "$GRAPH_ROOT" \
+    | grep -E '^\+[[:space:]]*(date|created|updated|decided|ended):[[:space:]]*"[0-9]{4}-[0-9]{2}-[0-9]{2}"' || true)"
+  if [[ -n "$polluted" ]]; then
+    {
+      echo ""
+      echo "🚫 圖譜污染指紋: frontmatter 日期欄位被加引號 (典型來源 = notesmd-cli frontmatter --edit)"
+      echo "   Obsidian property 型別會從 date 變 text,且通常伴隨整篇鍵序重排 — diff 不可審"
+      echo ""
+      echo "$polluted" | head -5 | sed 's/^/   /'
+      echo ""
+      echo "   檢視: git diff --cached -- ${GRAPH_ROOT}"
+      echo "   還原: git checkout -- <file>"
+      echo "   確屬刻意 (極罕見) → git commit --no-verify"
+      echo ""
+    } >&2
+    exit 1
+  fi
+fi
+
+# Gate 2: code 副檔名 (對齊 check-graph-sync.py CODE_EXTS)
+CODE_EXTS_RE='\.(cs|vue|js|ts|tsx|jsx|mjs|sql|py|kt|kts|java|swift|go|rs|c|cc|cpp|h|hpp)$'
+
+# 排除路徑
+should_exclude() {
+  local path="$1"
+  case "$path" in
+    docs/*|*/node_modules/*|*/bin/*|*/obj/*|*/.git/*|*/dist/*|*/build/*|*/__pycache__/*) return 0;;
+    *package-lock.json|*yarn.lock|*pnpm-lock.yaml) return 0;;
+  esac
+  return 1
+}
+
+src_files=()
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  if ! [[ "$f" =~ $CODE_EXTS_RE ]]; then continue; fi
+  if should_exclude "$f"; then continue; fi
+  src_files+=("$f")
+done <<< "$STAGED"
+
+# Gate 2: 沒 code → 放行
+[[ ${#src_files[@]} -eq 0 ]] && exit 0
+
+# Gate 3: 有圖譜 .md staged → 放行
+if echo "$STAGED" | grep -qE "^${GRAPH_ROOT}/.*\.md$"; then
+  exit 0
+fi
+
+# ── 印警告並擋 ──
+{
+  echo ""
+  echo "🚫 Pre-commit graph sync gate (git native hook): commit 改了原始碼但沒同步圖譜"
+  echo ""
+  echo "Staged code files (${#src_files[@]}):"
+  for f in "${src_files[@]:0:10}"; do echo "   • $f"; done
+  if [[ ${#src_files[@]} -gt 10 ]]; then
+    echo "   ... 還有 $(( ${#src_files[@]} - 10 )) 個"
+  fi
+  echo ""
+  echo "圖譜目錄 ${GRAPH_ROOT}/ 內無任何 .md 被 staged。"
+  echo ""
+  echo "依 lumos-project-notes skill,功能異動必須同步更新:"
+  echo "   • Systems/*.md  受影響的 system note"
+  echo "   • Verification/{date}_{topic}.md  驗證紀錄"
+  echo "   • Issues/*.md  相關 issue 狀態"
+  echo ""
+  echo "請選一條繼續:"
+  echo "   1. 更新圖譜後 git add docs/...-knowledge/...md 再重試 commit"
+  echo "   2. 確認此 commit 不需圖譜 (typo/格式/註解/WIP) → 加 --no-verify 跳過"
+  echo "      例: git commit --no-verify -m 'fix: typo in PointService'"
+  echo ""
+} >&2
+
+exit 1

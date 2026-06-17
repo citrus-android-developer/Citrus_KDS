@@ -3,7 +3,9 @@ type: system
 status: done
 created: 2026-06-08
 updated: 2026-06-08
-related: "[[SetStockPage]], [[POS-API端點]]"
+related:
+  - "[[SetStockPage]]"
+  - "[[POS-API端點]]"
 tags:
   - type/system
   - status/done

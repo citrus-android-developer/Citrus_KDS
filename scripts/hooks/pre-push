@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Git pre-push hook — 圖譜健康同步把關(push 前最後一道,同步可見)
+#
+# 為什麼需要:
+#   L2 pre-commit 只擋「污染指紋 + code 無圖譜」,不跑完整 doctor。
+#   壞圖譜狀態(斷連結 / orphan / verified_by 漏寫 / plan_refs 斷鏈)能 commit 過。
+#   CI push 觸發雖會抓,但**非同步、終端看不到、擋不了**(push 已發生)。
+#   pre-push 在 push 前**同步**跑 lumos doctor:Claude Code / 終端當場看到輸出,
+#   有問題擋下 push,壞圖譜出不了本機。self-contained(lumos 零 Obsidian 依賴)。
+#
+# Bypass: git push --no-verify(業界標準,code review / CI 仍會抓)
+#
+# 安裝: scripts/install-hooks.sh 已設 core.hooksPath=scripts/hooks,此檔放進去即生效
+
+set -u
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$REPO_ROOT" || exit 0
+
+# 無 lumos / python3 → 降級放行(不為缺環境 brick push,CI 兜底)
+GRAPHCTL="$REPO_ROOT/scripts/lumos"
+PY="$(command -v python3 || true)"
+if [[ -z "$PY" || ! -f "$GRAPHCTL" ]]; then
+  echo "pre-push: 無 python3 或 lumos,跳過圖譜巡檢(CI 仍會抓)" >&2
+  exit 0
+fi
+
+# 只在 vault 存在時跑
+have_vault=0
+for d in docs/*-knowledge docs/knowledge; do
+  [[ -d "$d" ]] && have_vault=1 && break
+done
+[[ $have_vault -eq 0 ]] && exit 0
+
+if "$PY" "$GRAPHCTL" doctor --ci; then
+  exit 0
+fi
+
+{
+  echo ""
+  echo "🚫 pre-push: lumos doctor 發現圖譜問題(見上方),push 已擋下"
+  echo ""
+  echo "請選一條:"
+  echo "  1. 修圖譜(補連結 / verified_by / plan_refs…)後重 push"
+  echo "  2. 確認非真問題(疑 lumos bug)→ 走並跑期裁決協議"
+  echo "     (lumos_計劃 §11:本地重現 → 讀 finding → Check1-3 可用 bash 裁決)"
+  echo "  3. 確屬可接受 → git push --no-verify(CI 仍會抓,留審計)"
+  echo ""
+} >&2
+exit 1
