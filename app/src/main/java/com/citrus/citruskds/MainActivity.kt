@@ -50,6 +50,14 @@ import com.citrus.citruskds.util.PrintUtil
 import com.citrus.citruskds.util.scanner.SunmiScanReceiver
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
+import android.provider.Settings
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
+import timber.log.Timber
 
 
 enum class HomeTabs(
@@ -141,6 +149,42 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             vibrator.vibrate(120)
         }
+    }
+
+    /** 「未知來源」設定頁返回：已授權則續裝（避免 PERMISSION_NO_CALLBACK 要再按一次）。 */
+    private val unknownSourcesLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
+                launchApkInstaller()
+            }
+        }
+
+    /**
+     * 下載完成後啟動系統安裝器安裝新版 APK。
+     * Android 8+ 未授予「未知來源」時先導去設定頁，返回後自動續裝。
+     */
+    private fun installApk() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            unknownSourcesLauncher.launch(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+            )
+            return
+        }
+        launchApkInstaller()
+    }
+
+    private fun launchApkInstaller() {
+        val file = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), APK_FILE_NAME)
+        if (!file.exists()) {
+            Timber.e("安裝失敗：APK 不存在 ${file.absolutePath}")
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "kds.provider", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { startActivity(intent) }.onFailure { Timber.e(it, "啟動安裝器失敗") }
     }
 
     override fun onResume() {
@@ -284,6 +328,18 @@ class MainActivity : ComponentActivity() {
                                 launchSingleTop = true
                             }
                         })
+                    }
+                }
+
+                // 下載成功 → 關進度對話框 + 啟動系統安裝器（一次性 effect）
+                LaunchedEffect(Unit) {
+                    homeViewModel.effect.collect { effect ->
+                        when (effect) {
+                            is CentralContract.Effect.DownloadApkSuccess -> {
+                                homeViewModel.setEvent(CentralContract.Event.OnDismissDownloadApkDialog)
+                                installApk()
+                            }
+                        }
                     }
                 }
 
