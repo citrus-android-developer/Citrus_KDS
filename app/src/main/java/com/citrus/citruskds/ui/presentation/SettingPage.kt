@@ -102,7 +102,7 @@ fun SettingContent(
 
         // 測試列印/連線結果（errMsg）在設定頁直接顯示，不必切回主頁
         if (state.errMsg != null) {
-            ErrorDialog(state.errMsg, onDismissRequest = {
+            ErrorDialog(state.errMsg, isSuccess = state.isMsgSuccess, onDismissRequest = {
                 event(CentralContract.Event.onDismissErrorDialog)
             })
         }

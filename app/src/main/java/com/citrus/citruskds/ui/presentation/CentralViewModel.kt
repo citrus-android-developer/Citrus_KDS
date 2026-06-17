@@ -316,7 +316,7 @@ class CentralViewModel @Inject constructor(
 
             is CentralContract.Event.onDismissErrorDialog -> {
                 setState {
-                    copy(errMsg = null, printStatus = PrintStatus.Idle)
+                    copy(errMsg = null, printStatus = PrintStatus.Idle, isMsgSuccess = false)
                 }
             }
 
@@ -544,7 +544,7 @@ class CentralViewModel @Inject constructor(
                 viewModelScope.launch {
                     val ip = prefs.printerIp
                     if (ip.isBlank()) {
-                        setState { copy(errMsg = UiText.StringResource(R.string.printer_ip_required)) }
+                        setState { copy(errMsg = UiText.StringResource(R.string.printer_ip_required), isMsgSuccess = false) }
                         return@launch
                     }
                     val ok = LanPrinter(ip = ip, port = prefs.printerPort).ping()
@@ -555,7 +555,8 @@ class CentralViewModel @Inject constructor(
                                 if (ok) R.string.printer_connect_success
                                 else R.string.printer_connect_failed,
                                 arrayOf(target)
-                            )
+                            ),
+                            isMsgSuccess = ok
                         )
                     }
                 }

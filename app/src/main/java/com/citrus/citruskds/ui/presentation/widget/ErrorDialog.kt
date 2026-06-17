@@ -50,6 +50,7 @@ import com.citrus.citruskds.di.prefs
 import com.citrus.citruskds.ui.theme.ColorBlue
 import com.citrus.citruskds.ui.theme.ColorPrimary
 import com.citrus.citruskds.ui.theme.ColorWhiteBg
+import com.citrus.citruskds.ui.theme.StockGreen
 import com.citrus.citruskds.util.Constants.code
 import com.citrus.citruskds.util.Constants.finalCode
 import com.citrus.citruskds.util.InputStateWrapper
@@ -66,6 +67,7 @@ fun ErrorDialog(
     onDismissRequest: () -> Unit,
     confirmText: String? = null,
     onConfirm: (() -> Unit)? = null,
+    isSuccess: Boolean = false,
 ) {
 
 
@@ -107,9 +109,11 @@ fun ErrorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.baseline_error_24),
+                        painter = painterResource(
+                            id = if (isSuccess) R.drawable.ic_check_square else R.drawable.baseline_error_24
+                        ),
                         contentDescription = null,
-                        tint = Color.Red,
+                        tint = if (isSuccess) StockGreen else Color.Red,
                         modifier = Modifier
                             .size(30.dp)
                     )

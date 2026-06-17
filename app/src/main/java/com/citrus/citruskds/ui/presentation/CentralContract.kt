@@ -86,6 +86,8 @@ class CentralContract {
         var stockTypeSelected: String = "All",
         var stockSearchState: InputStateWrapper,
         var errMsg: UiText? = null,
+        /** errMsg 是否為「成功」訊息（true → ErrorDialog 顯示綠勾而非紅驚嘆號）。只有測試列印成功設 true。 */
+        var isMsgSuccess: Boolean = false,
         var printOrder: Order? = null,
         // 每次列印請求遞增；列印觸發改 key 在此，確保「重印同一張(含加點)」也能重觸發
         var printRequestId: Int = 0,
