@@ -107,6 +107,24 @@ def t_new_path_traversal():
     check("BUG-6 未在 vault 外建檔", not (v.parent.parent.parent / "tmp" / "injected.md").exists())
 
 
+def t_new_teaches_tags():
+    # new 在執行當下教標籤規則:stdout 含合約鏈提示,檔案骨架含完整符號行
+    v = mkvault()
+    r = run(v, "new", "system", "AcctSvc", expect_rc=0)
+    check("new system: stdout 教 ★INVARIANT★ + [test:] 合約鏈",
+          "★INVARIANT★" in r.stdout and "[test:" in r.stdout, r.stdout)
+    check("new system: stdout 提示寫完跑 doctor", "lumos doctor" in r.stdout, r.stdout)
+    txt = read(v / "Systems" / "AcctSvc.md")
+    check("new system: summary 骨架含 FLOW/KEY/DEP/TEST 符號行",
+          all(s in txt for s in ("FLOW:", "KEY:", "DEP:", "TEST:")), txt)
+    r2 = run(v, "new", "issue", "BadState", expect_rc=0)
+    t2 = read(v / "Issues" / "BadState.md")
+    check("new issue: 骨架含 FLAG/DECISION/KEY", all(s in t2 for s in ("FLAG:", "DECISION:", "KEY:")), t2)
+    # 骨架本身要過 doctor(空符號行不該觸發 lint)
+    rd = run(v, "doctor", "--ci")
+    check("new 骨架 doctor 不報問題", rd.returncode == 0, rd.stdout)
+
+
 # ── BUG-7: fmt_scalar YAML 型別劫持 ──
 def t_set_boolean_guard():
     v = mkvault()
@@ -549,6 +567,106 @@ def t_invariant_test_binding():
     r2 = run(v2, "doctor", "--ci")
     check("Check T: 綁了 [test:] 的 ★INVARIANT★ 不算裸合約",
           "裸 ★INVARIANT★" not in r2.stdout, r2.stdout)
+
+
+def t_invariant_audit_binding():
+    # Check T 牙齒:綁了 [test:] 但無 [audit:] → doctor 報「未經獨立審計」(maker/checker 破口)
+    v = mkvault()
+    write(v, "Systems/Bound.md",
+          "type: system\nstatus: done\nsummary: |-\n"
+          "  KEY:★INVARIANT★ 點數不足必須擋 [test:SomeGuard]",
+          body="# Bound\n")
+    r = run(v, "doctor", "--ci")
+    check("Check T: 綁測試但未經獨立審計 → doctor 擋(rc1)",
+          r.returncode == 1 and "未經獨立審計" in r.stdout, r.stdout)
+    # 加上 [audit:模型/日期] → 不再報未審
+    v2 = mkvault()
+    write(v2, "Systems/Aud.md",
+          "type: system\nstatus: done\nsummary: |-\n"
+          "  KEY:★INVARIANT★ 點數不足必須擋 [test:SomeGuard] [audit:sonnet/2026-06-18]",
+          body="# Aud\n")
+    r2 = run(v2, "doctor", "--ci")
+    check("Check T: 有 [audit:] 留痕 → 不再報未審", "未經獨立審計" not in r2.stdout, r2.stdout)
+    # 裸合約(連 [test:] 都沒)不應被未審項誤報(naked 先擋,audit 不雙重計)
+    v3 = mkvault()
+    write(v3, "Systems/Naked.md",
+          "type: system\nstatus: done\nsummary: |-\n  KEY:★INVARIANT★ 沒綁測試的",
+          body="# Naked\n")
+    r3 = run(v3, "doctor", "--ci")
+    check("Check T: 裸合約只報裸、不報未審(不雙重計)",
+          "未經獨立審計" not in r3.stdout and "裸 ★INVARIANT★" in r3.stdout, r3.stdout)
+
+
+def t_guard_audit():
+    # guard audit:把 [audit:模型/日期] 留痕寫回 KEY 行,保留 [test:],重審覆蓋舊留痕
+    v = mkvault()
+    p = write(v, "Systems/S.md",
+              "type: system\nstatus: done\nsummary: |-\n"
+              "  KEY:★INVARIANT★ 點數不足必須擋 [test:SomeGuard]",
+              body="# S\n")
+    r = run(v, "guard", "audit", "Systems/S", "點數不足", "--date", "2026-06-18")
+    txt = read(p)
+    check("guard audit: [audit:] 寫回 KEY 行", "[audit:sonnet/2026-06-18]" in txt, r.stdout + r.stderr)
+    check("guard audit: [test:] 綁定不受影響", "[test:SomeGuard]" in txt, txt)
+    # 重審(換模型/日期)→ 覆蓋,不重複留痕
+    run(v, "guard", "audit", "Systems/S", "點數不足", "--date", "2026-07-01", "--model", "opus")
+    txt2 = read(p)
+    check("guard audit: 重審覆蓋舊留痕(新日期生效)",
+          "[audit:opus/2026-07-01]" in txt2 and "2026-06-18" not in txt2, txt2)
+    check("guard audit: 不累積(只一個 audit 標記)", txt2.count("[audit:") == 1, txt2)
+    # 找不到子字串 → rc2
+    r3 = run(v, "guard", "audit", "Systems/S", "不存在的合約")
+    check("guard audit: 子字串找不到 KEY 行 → rc2", r3.returncode == 2, r3.stdout + r3.stderr)
+
+
+def t_lint():
+    # 單檔快檢:乾淨節點過、各種寫入當下的錯被抓
+    v = mkvault()
+    # 乾淨 system(無合約)→ 0 問題
+    write(v, "Systems/Clean.md",
+          "type: system\nstatus: doing\nsummary: |-\n  FLOW:a→b\n  KEY:某關鍵", body="# Clean\n")
+    r = run(v, "lint", "Systems/Clean")
+    check("lint: 乾淨節點 rc0", r.returncode == 0 and "0 問題" in r.stdout, r.stdout)
+    # 裸 ★INVARIANT★ → error rc1
+    write(v, "Systems/Naked.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★INVARIANT★ 沒綁測試的", body="# N\n")
+    r = run(v, "lint", "Systems/Naked")
+    check("lint: 裸合約 → rc1 error", r.returncode == 1 and "裸 ★INVARIANT★" in r.stdout, r.stdout)
+    # ★INVARIANT★ 沒當 KEY 前綴(放 FLOW 行)→ 格式 error
+    write(v, "Systems/BadMark.md",
+          "type: system\nstatus: doing\nsummary: |-\n  FLOW:★INVARIANT★ 放錯行", body="# B\n")
+    r = run(v, "lint", "Systems/BadMark")
+    check("lint: ★ 非 KEY 前綴 → rc1(格式錯,contracts 抓不到)",
+          r.returncode == 1 and "必須是 KEY 行前綴" in r.stdout, r.stdout)
+    # 綁測試但未審 → error
+    write(v, "Systems/Unaud.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★INVARIANT★ 擋下 [test:G]", body="# U\n")
+    r = run(v, "lint", "Systems/Unaud")
+    check("lint: 綁測試未審 → rc1", r.returncode == 1 and "未獨立審計" in r.stdout, r.stdout)
+    # 綁測試 + 已審 → 0 問題
+    write(v, "Systems/Good.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★INVARIANT★ 擋下 [test:G] [audit:sonnet/2026-06-18]",
+          body="# G\n")
+    r = run(v, "lint", "Systems/Good")
+    check("lint: 綁測試+已審 → rc0", r.returncode == 0, r.stdout)
+    # system 缺 summary → error
+    write(v, "Systems/NoSum.md", "type: system\nstatus: doing", body="# NS\n")
+    r = run(v, "lint", "Systems/NoSum")
+    check("lint: system 缺 summary → rc1", r.returncode == 1 and "summary" in r.stdout, r.stdout)
+    # ghost trap(單字串多 wikilink)→ error(複用 frontmatter 指紋)
+    write(v, "Systems/Ghost.md",
+          "type: system\nstatus: doing\nrelated: \"[[A]], [[B]]\"\nsummary: |-\n  KEY:x", body="# Gh\n")
+    r = run(v, "lint", "Systems/Ghost")
+    check("lint: 單字串多 wikilink ghost trap → rc1", r.returncode == 1 and "ghost" in r.stdout.lower(), r.stdout)
+    # symbol typo → warning(不阻擋 rc0)
+    write(v, "Systems/Typo.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KYE:打錯的符號\n  KEY:正常", body="# T\n")
+    r = run(v, "lint", "Systems/Typo")
+    check("lint: 符號 typo → warning 不阻擋(rc0)",
+          r.returncode == 0 and "非標準符號行" in r.stdout, r.stdout)
+    # 找不到節點 → rc2
+    r = run(v, "lint", "Systems/NoSuchNode")
+    check("lint: 找不到節點 → rc2", r.returncode == 2, r.stdout + r.stderr)
 
 
 def t_guard():

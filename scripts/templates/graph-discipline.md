@@ -18,6 +18,32 @@
 - **退場必寫**：做完用 lumos 把脈絡（決策 / 驗證 / 合約）寫回。
 - **計劃/設計也歸圖譜**：任何設計 / spec / 計劃產出（**不論來源——brainstorming、writing-plans、OpenSpec、其他 SDD / spec-driven 工具皆同**）一律寫成 lumos 計劃節點（`Projects/<主題>_計劃`，`type: project`），**不寫 `docs/superpowers/specs/`、`openspec/` 或其他 repo 路徑**；落地的 Verification 以 `plan_refs` 回指（意圖鏈，graph-doctor Check 4 把關）。任何工具內建的 spec 落點一律以此覆寫——「圖譜即真相」涵蓋計劃，不只 code。
 
+### 寫入時的標籤規範（速查，動筆前掃一眼；完整規範見 `lumos-project-notes` skill）
+
+**summary 區塊符號行**（Systems/Issues 的 `summary: |-` 內，每行一個前綴）：
+
+| 前綴 | 用途 | 前綴 | 用途 |
+|------|------|------|------|
+| `FLOW:` | 核心流程 `a→b→c` | `VERIFY:` | 驗證紀錄 `[[..]]` |
+| `KEY:` | 關鍵概念/欄位 | `DECISION:` | 決策簡版指針 |
+| `DEP:` | 依賴模組 `[[..]]` | `FLAG:` | 語意標記 `TECHNICAL`/`DECISION`/`ORIGIN` |
+| `TEST:` | 測試狀態 | `AUTH:` | 認證方式 |
+
+**合約鏈（最重要，KEY 行前綴 + 行尾指針）**：
+```
+KEY:★INVARIANT★ <業務合約,改=breaking> [test:測試方法名] [audit:模型/日期]
+                 └ 宣稱            └ 可執行證據(verify) └ 無脈絡獨立 agent 審合法性
+KEY:★DEBT★ <已知偶然行為,可改不算 breaking>
+```
+- `★INVARIANT★` 必綁 `[test:]`(否則 doctor 報裸合約)→ 經獨立審計留 `[audit:]`(否則報未審)。**不確定是不是合約就不標**,嚴禁從 code 反推。
+- 綁定/審計走指令(寫後自驗),別手寫:`lumos guard bind <node> "<KEY子字串>" <測試名>` / `lumos guard audit <node> "<KEY子字串>"`。
+
+**frontmatter 欄位**：`type`(system/verification/issue/project/moc)、`status`(doing/pass/open/done/stale/superseded)、`verified_by`/`plan_refs`/`related`/`tags`(list)、`decisions`(ADR 巢狀)、`valid_under`/`revalidate_when`(重驗條件)、`core_refs`(核心指針,純文字路徑)。
+- ⚠ **多個 wikilink 必須是 YAML list,一項一行**(`- "[[A]]"`/`- "[[B]]"`);寫成 `"[[A]], [[B]]"` 單字串會長出 ghost 節點。
+- 純量/list/decisions 一律走 `lumos set`/`append`/`decision-add`(安全格式+寫後自驗),別手改 frontmatter。
+
+> 寫完一個節點先跑 `lumos lint <節點>`(單檔快檢:type/summary/★ 格式/裸合約/未審/ghost trap)→ 收尾再 `lumos doctor` 跑全圖;push 前 pre-push 會再擋一次。
+
 ### 主動調用 Skill（遇到情境就調用，別憑記憶硬幹）
 
 | 你要做的事 | 必調用 |

@@ -533,10 +533,15 @@ def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
     if not inv_all:
         ok("無 ★INVARIANT★ 合約 (無載重宣稱需綁測試)")
     else:
-        naked, bound = [], []
+        naked, bound, unaudited = [], [], []
         for rel, inv in inv_all:
             clean, refs = strip_test_refs(inv)
-            (bound if refs else naked).append((rel, clean, refs))
+            if refs:
+                bound.append((rel, clean, refs))
+                if not invariant_audit_refs(inv):     # 綁了測試但沒經獨立合法性審計
+                    unaudited.append((rel, clean))
+            else:
+                naked.append((rel, clean, refs))
         dangling, fake = [], []
         if bound:
             if repo_root is None:
@@ -555,8 +560,9 @@ def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
                             fake.append(f"{rel}: [test:{name}] 在程式碼出現,但不是 {_attr} 測試方法")
                         else:
                             dangling.append(f"{rel}: [test:{name}] 在程式碼中找不到")
-        if not naked and not dangling and not fake:
-            ok(f"{len(bound)} 條 ★INVARIANT★ 都綁了真實可執行測試方法 (0 裸合約 / 0 偽證據 / 0 懸空)")
+        if not naked and not dangling and not fake and not unaudited:
+            ok(f"{len(bound)} 條 ★INVARIANT★ 都綁了真實可執行測試方法且經獨立審計 "
+               "(0 裸合約 / 0 偽證據 / 0 懸空 / 0 未審)")
         if naked:
             warn([f"{r}: {first_line(c, 70)}" for r, c, _ in naked],
                  f"發現 {len(naked)} 條裸 ★INVARIANT★ (載重宣稱沒綁測試 → 無法機械驗真):",
@@ -567,6 +573,12 @@ def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
         if dangling:
             warn(dangling, f"發現 {len(dangling)} 條懸空 test_ref (綁的測試在程式碼中不存在):",
                  "建立該測試,或修正 [test:] 名稱")
+        if unaudited:
+            warn([f"{r}: {first_line(c, 70)}" for r, c in unaudited],
+                 f"發現 {len(unaudited)} 條 ★INVARIANT★ 綁了測試但合法性未經獨立審計 "
+                 "(『是不是真鐵則 / 綁的測試夠不夠格』仍由提出者自評 → maker/checker 破口):",
+                 "派一個無對話脈絡的乾淨 agent 判合法性(別餵你的結論),過了用 "
+                 "`lumos guard audit <node> \"<KEY 行子字串>\"` 留痕")
     print()
 
     print(f"{C['B']}─────────────────────────────────{C['X']}")
@@ -718,6 +730,12 @@ def extract_contracts(note):
 
 
 TEST_REF_RE = re.compile(r"\[test:\s*([^\]]+)\]")
+# [audit:模型/日期] — ★INVARIANT★ 合法性經「無對話脈絡的獨立 agent」審計過的留痕。
+# 與 [test:] 平行:test 證『有沒有照規則做』,audit 證『這規則該不該是鐵則 / 綁的測試夠不夠格』
+# (沒標準答案的判斷不得由提出者本人自評 — maker/checker)。doctor Check T 強制。
+AUDIT_REF_RE = re.compile(r"\[audit:\s*([^\]]+)\]")
+# 抽「乾淨宣稱文字」時 test 與 audit 兩種標記都要剝掉(否則漏進顯示/子字串比對)。
+INV_TAG_RE = re.compile(r"\[(?:test|audit):\s*[^\]]+\]")
 # 真實可執行測試方法:xUnit 屬性([Fact]/[Theory]/[SkippableFact],含 (Skip=..) 變體)
 # + 可選後續屬性(InlineData/MemberData/Trait)→ 存取修飾 → 可選 async → 回傳型別 → 方法名。
 # B6 審計:Check T 不能只做子字串比對(會把「散文裡剛好提到的字」當證據);必須認到真方法。
@@ -831,9 +849,14 @@ def invariant_test_refs(inv_text):
     return out
 
 
+def invariant_audit_refs(inv_text):
+    """從 ★INVARIANT★ 文字抽 [audit:模型/日期] 留痕(通常一條)。無=回 []。"""
+    return [m.strip() for m in AUDIT_REF_RE.findall(inv_text) if m.strip()]
+
+
 def strip_test_refs(inv_text):
-    """回傳 (去掉 [test:..] 標記的乾淨宣稱文字, 綁定測試名 list)。"""
-    return TEST_REF_RE.sub("", inv_text).strip(), invariant_test_refs(inv_text)
+    """回傳 (去掉 [test:..]/[audit:..] 標記的乾淨宣稱文字, 綁定測試名 list)。"""
+    return INV_TAG_RE.sub("", inv_text).strip(), invariant_test_refs(inv_text)
 
 
 def build_code_haystack(repo_root):
@@ -903,6 +926,68 @@ def cmd_contracts(env, rel=None):
     return 0
 
 
+KNOWN_TYPES = {"system", "verification", "issue", "project", "moc"}
+SYMBOL_NAMES = {"KEY", "FLOW", "DEP", "TEST", "AUTH", "FLAG", "DECISION", "VERIFY", "CORE"}
+SYMBOLISH_RE = re.compile(r"^([A-Z]{2,}):")   # 像「符號宣告」的行(全大寫前綴)→ 抓 typo
+
+
+def cmd_lint(env, node):
+    """單檔快檢:寫完一個節點立刻自驗標籤/格式(node-local,不掃 repo → 比 doctor 快)。
+    抓「寫入當下」最常見的錯:type/summary 缺漏、★ 標記格式錯(漏被 contracts 抓)、
+    裸合約 / 未審、symbol 行 typo、frontmatter 指紋(ghost trap…)。
+    與 doctor 分工:doctor 是全圖權威(跨節點完整性 + [test:] 存在性),lint 只看這一篇、
+    predicts pre-push 會不會擋(error 即 doctor --ci 會擋的同類)。"""
+    rel = env.find(node)
+    if rel is None:
+        print(f"ERROR: 找不到節點 {node}", file=sys.stderr)
+        return 2
+    n = env.notes[rel]
+    errs = list(n.lint)          # frontmatter 指紋(ghost trap / 重複鍵 / 日期引號…)= error
+    warns = []
+
+    t = n.fields.get("type")
+    if not isinstance(t, str) or not t:
+        errs.append("缺 type(frontmatter 必須有 type)")
+    elif t not in KNOWN_TYPES:
+        errs.append(f"未知 type『{t}』(應為 {'/'.join(sorted(KNOWN_TYPES))})")
+
+    summ = n.fields.get("summary")
+    summ = summ if isinstance(summ, str) else ""
+    if t in ("system", "issue") and not summ.strip():
+        errs.append(f"{t} 節點必須有 summary block(放 FLOW:/KEY:/DEP: 等符號行)")
+
+    for raw in summ.split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        ms = SYMBOLISH_RE.match(line)
+        if ms and ms.group(1) not in SYMBOL_NAMES:
+            warns.append(f"非標準符號行『{ms.group(1)}:』(typo? 符號應為 {'/'.join(sorted(SYMBOL_NAMES))})")
+        for mark, rx in (("★INVARIANT★", INVARIANT_RE), ("★DEBT★", DEBT_RE)):
+            if mark in line and not rx.match(line):
+                errs.append(f"{mark} 必須是 KEY 行前綴(KEY:{mark} ...),否則 contracts/doctor 抓不到:{line[:48]}")
+
+    invs, _ = extract_contracts(n)
+    for inv in invs:
+        clean, refs = strip_test_refs(inv)
+        if not refs:
+            errs.append(f"裸 ★INVARIANT★(沒綁 [test:],Check T 會擋):{first_line(clean, 48)}")
+        elif not invariant_audit_refs(inv):
+            errs.append(f"★INVARIANT★ 綁了測試但未獨立審計(缺 [audit:],pre-push 會擋):{first_line(clean, 48)}")
+
+    if not errs and not warns:
+        print(f"✓ lint {rel} — 0 問題")
+        return 0
+    print(f"lint {rel}")
+    for e in errs:
+        print(f"  ✗ {e}")
+    for w in warns:
+        print(f"  ⚠ {w}")
+    print(f"\n{len(errs)} error / {len(warns)} warning"
+          + ("" if errs else "(warning 不阻擋,但建議補)"))
+    return 1 if errs else 0
+
+
 # ───────────── guard: 合約守衛 scaffold(對談驅動)─────────────
 # lumos 只做機械活:① 列出 ★INVARIANT★ 綁定狀態 ② 套範本產 stub(預設紅燈) ③ 把 [test:] 綁回 KEY 行(自驗)。
 # 「斷言本體」由 Claude 經對談向人確認意圖後填 — claim 的真來自人確認,不來自 code 反推
@@ -938,7 +1023,9 @@ def classify_invariants(env):
                 status = "fake"
             else:
                 status = "real"
-            rows.append({"node": rel, "text": clean, "refs": refs, "status": status})
+            rows.append({"node": rel, "text": clean, "refs": refs, "status": status,
+                         "audited": bool(invariant_audit_refs(x)),
+                         "audit": invariant_audit_refs(x)})
     return rows
 
 
@@ -951,11 +1038,14 @@ def cmd_guard_list(env, unbound_only=False):
         shown += 1
         print(f"{GUARD_ICON[r['status']]}  {r['node']}")
         print(f"    {r['text'][:96]}")
-        print(f"    [test:{','.join(r['refs'])}]" if r["refs"] else "    (未綁)")
+        tag = f"[test:{','.join(r['refs'])}]" if r["refs"] else "(未綁)"
+        tag += f"  [audit:{','.join(r['audit'])}]" if r["audited"] else ("  ⚠ 未審" if r["refs"] else "")
+        print(f"    {tag}")
     from collections import Counter
     c = Counter(r["status"] for r in rows)
+    unaudited = sum(1 for r in rows if r["refs"] and not r["audited"])
     print(f"\n合約 {len(rows)} 條 — 真綁 {c['real']} / 懸空 {c['dangling']} / "
-          f"偽證據 {c['fake']} / 裸 {c['naked']}")
+          f"偽證據 {c['fake']} / 裸 {c['naked']} / 未審 {unaudited}")
     if unbound_only and shown == 0:
         print("✓ 沒有未綁合約(全綁真方法)")
     return 0
@@ -1136,6 +1226,64 @@ def cmd_guard_bind(env, node, invariant_substr, method):
         return 2
     print(f"✓ 綁定 [test:{method}] → {rel} 的 ★INVARIANT★")
     print("  下一步: lumos doctor — 方法須已存在於 code,否則 Check T 顯示懸空")
+    return 0
+
+
+def cmd_guard_audit(env, node, invariant_substr, model="sonnet", date=None):
+    """把 [audit:模型/日期] 留痕寫回 ★INVARIANT★ KEY 行(寫後自驗)。
+    語意:這條鐵則的「合法性」(是不是真鐵則 / 綁的測試夠不夠格)已由一個
+    *無對話脈絡的獨立 agent* 判過並通過。工具只記留痕,不證明審計真的乾淨——
+    那靠 skill 的 maker/checker 誠實鐵則(別餵結論給審計者、提出者不得自評)。"""
+    import datetime
+    if date is None:
+        date = datetime.date.today().isoformat()
+    stamp = f"{model}/{date}"
+    rel = env.find(node)
+    if rel is None:
+        print(f"ERROR: 找不到節點 {node}", file=sys.stderr)
+        return 2
+    path = env.vault / rel
+    try:
+        lines, _, e = load_raw_for_edit(path)
+    except (ValueError, RuntimeError) as ex:
+        print(f"ERROR: {ex}", file=sys.stderr)
+        return 2
+    target_idx = None
+    for i in range(1, e):
+        # 比對去掉 [test:]/[audit:] 後的行(子字串不誤命中既有標記內容)
+        if INVARIANT_RE.match(lines[i].strip()) and invariant_substr in INV_TAG_RE.sub("", lines[i]):
+            if target_idx is not None:
+                print(f"ERROR: 『{invariant_substr}』命中多條 KEY 行,請給更精確子字串", file=sys.stderr)
+                return 2
+            target_idx = i
+    if target_idx is None:
+        print(f"ERROR: {rel} 找不到含『{invariant_substr}』的 ★INVARIANT★ KEY 行", file=sys.stderr)
+        return 2
+    line = lines[target_idx]
+    m = AUDIT_REF_RE.search(line)
+    if m:
+        newline = line[:m.start()] + f"[audit:{stamp}]" + line[m.end():]   # 重審 → 覆蓋舊留痕(新日期生效)
+    else:
+        newline = line.rstrip() + f" [audit:{stamp}]"
+    new_lines = lines[:target_idx] + [newline] + lines[target_idx + 1:]
+
+    def check(fields):
+        summ = fields.get("summary")
+        if not isinstance(summ, str):
+            return False
+        for l in summ.split("\n"):
+            mi = INVARIANT_RE.match(l.strip())
+            if mi and invariant_substr in INV_TAG_RE.sub("", l):
+                return stamp in invariant_audit_refs(mi.group(1))
+        return False
+
+    try:
+        atomic_write_verify(path, new_lines, f"[audit:{stamp}]", check)
+    except (ValueError, RuntimeError) as ex:
+        print(f"ERROR: {ex}", file=sys.stderr)
+        return 2
+    print(f"✓ 留痕 [audit:{stamp}] → {rel} 的 ★INVARIANT★")
+    print("  前提:這條合法性已由無脈絡的獨立 agent 判過(maker≠checker)。doctor Check T 不再報『未審』。")
     return 0
 
 
@@ -1526,6 +1674,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .chip.on{color:var(--text);background:var(--surface2);border-color:var(--faint)}
   .chip.off{opacity:.38}
   #cy{position:fixed;top:64px;left:0;right:0;bottom:0;z-index:1}
+  /* 常駐節點標籤:HTML 疊層,逐幀貼到節點螢幕座標上(無 WebGL 文字依賴) */
+  #labels{position:fixed;top:64px;left:0;right:0;bottom:0;z-index:2;pointer-events:none;overflow:hidden}
+  .nlab{position:absolute;top:0;left:0;white-space:nowrap;font-family:var(--font-ui);font-weight:600;
+    color:rgba(214,220,234,.52);                       /* 淡:半透明霧白 */
+    text-shadow:0 1px 4px rgba(0,0,0,.92),0 0 2px rgba(0,0,0,.85);  /* 細陰影 → 深色背景與亮節點上都讀得到 */
+    transform:translate(-9999px,-9999px);will-change:transform,opacity;transition:opacity .18s}
   #panel{position:fixed;top:64px;right:0;bottom:0;width:460px;max-width:90vw;z-index:9;
     background:linear-gradient(180deg,var(--surface),#0c0e15);border-left:1px solid var(--border);
     box-shadow:var(--shadow);transform:translateX(102%);
@@ -1584,6 +1738,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="chip on" id="staletoggle"><span class="dot" style="background:var(--stale)"></span>只看 stale</div>
 </div>
 <div id="cy"></div>
+<div id="labels"></div>
 <div id="panel">
   <div id="close">✕</div>
   <div id="phead"><div class="kicker"></div><div class="ttl"></div><div class="meta"></div></div>
@@ -1653,6 +1808,36 @@ Graph
 // 貼合 top bar 下方的容器尺寸(預設會用整個 window 高度,會被頂欄遮 64px)
 function sizeGraph(){ Graph.width(window.innerWidth).height(window.innerHeight-64); }
 sizeGraph(); window.addEventListener('resize', sizeGraph);
+
+// ---- 常駐節點標籤:HTML 疊層逐幀同步到節點螢幕座標 ----
+// 不依賴 three-spritetext(會逼出全域 THREE,風險高、離線臃腫);改用 graph2ScreenCoords 投影,
+// 用 Graph.camera() 既有的 Vector3 做前/後剔除(不需自帶 THREE)。
+const labLayer=document.getElementById('labels'), labOf=new Map();
+DATA.nodes.forEach(n=>{ const d=document.createElement('div'); d.className='nlab';
+  d.textContent=n.label; d.style.fontSize=(11+Math.min(n.indeg,16)*0.25)+'px';  // 樞紐字略大,先被看見
+  labLayer.appendChild(d); labOf.set(n,d); });
+function syncLabels(){
+  requestAnimationFrame(syncLabels);
+  const cam=Graph.camera(); if(!cam||!cam.position) return;
+  const fwd=cam.position.clone(); cam.getWorldDirection(fwd);           // 相機朝向(Vector3,複用內建 THREE)
+  const p=cam.position.clone();
+  const camDist=cam.position.length()||1;                              // 相機到圖心(力場置中於原點)的距離 → 淡出基準,與縮放無關
+  const W=window.innerWidth, H=window.innerHeight-64;
+  DATA.nodes.forEach(n=>{
+    const d=labOf.get(n);
+    if(!nvisible(n)){ d.style.opacity=0; return; }                     // type chip / 只看 stale 過濾
+    p.set(n.x||0,n.y||0,n.z||0);
+    const to=p.clone().sub(cam.position);
+    if(to.dot(fwd)<=0){ d.style.opacity=0; return; }                   // 在相機背後 → 不畫
+    const s=Graph.graph2ScreenCoords(n.x||0,n.y||0,n.z||0);
+    if(s.x<-40||s.x>W+40||s.y<-20||s.y>H+20){ d.style.opacity=0; return; }  // 出畫面
+    d.style.transform='translate('+(s.x)+'px,'+(s.y-13)+'px) translateX(-50%)';  // 置中、略抬到球頂上方
+    const dim = hlN.size && !hlN.has(n);                               // 點選聚焦時,非鄰域更淡
+    const far = Math.min(1, (camDist*1.2)/(to.length()||1));           // 相對相機距離淡出(縮放不變)→ 框全圖時仍清楚可見
+    d.style.opacity = (dim?0.14:0.62) * (0.5+0.5*far);
+  });
+}
+requestAnimationFrame(syncLabels);
 
 function refresh(){
   Graph.nodeColor(ncolor).linkColor(lcolor).linkWidth(lwidth)
@@ -2167,13 +2352,32 @@ def cmd_decision_add(env, rel, content, decided, context=None, why=None):
 
 TEMPLATES = {
     "system": ("Systems", "type: system\nstatus: doing\ncreated: {today}\nupdated: {today}\n"
-               "tags:\n  - type/system\n  - status/doing\nsummary: |-\n  FLOW:\n  KEY:\n  DEP:"),
+               "tags:\n  - type/system\n  - status/doing\nsummary: |-\n  FLOW:\n  KEY:\n  DEP:\n  TEST:"),
     "verification": ("Verification", "type: verification\nstatus: pass\ndate: {today}\n"
                      "valid_under:\nrevalidate_when:\ntags:\n  - type/verification\n  - status/pass"),
     "issue": ("Issues", "type: issue\nstatus: open\ncreated: {today}\nupdated: {today}\n"
-              "tags:\n  - type/issue\n  - status/open\nsummary: |-\n  FLAG:\n  KEY:"),
+              "tags:\n  - type/issue\n  - status/open\nsummary: |-\n  FLAG:\n  DECISION:\n  KEY:"),
     "project": ("Projects", "type: project\nstatus: doing\ncreated: {today}\nupdated: {today}\n"
                 "tags:\n  - type/project\n  - status/doing"),
+}
+
+# new 後印出的「寫入當下教學」:符號行怎麼填 + 合約鏈,讓正確格式在執行 CLI 的此刻就在 context。
+NEW_HINT = {
+    "system": [
+        "填 summary 符號行: FLOW:<流程 a→b→c>  KEY:<關鍵概念/欄位>  DEP:[[依賴模組]]  TEST:<測試狀態>",
+        "合約用 KEY 行前綴: ★INVARIANT★=業務合約(改=breaking),必綁 [test:測試名] 再經獨立 [audit:];★DEBT★=偶然可改",
+        "  └ 綁定別手寫: lumos guard bind <node> \"<KEY子字串>\" <測試名> / guard audit <node> \"<KEY子字串>\"",
+    ],
+    "issue": [
+        "填 summary 符號行: FLAG:<TECHNICAL/DECISION/ORIGIN>  DECISION:<決策簡述>  KEY:<關鍵發現>",
+    ],
+    "verification": [
+        "填 valid_under:<此驗證在什麼前提下成立>  revalidate_when:<改到什麼時該重驗>",
+        "從對應 Systems 用 verified_by 回掛本篇(或 lumos sync-verified-by 補);summary 可選 TEST:/VERIFY:",
+    ],
+    "project": [
+        "計劃節點: 落地的 Verification 用 plan_refs 回指本節點(意圖鏈,doctor Check 4 把關)",
+    ],
 }
 
 
@@ -2193,6 +2397,9 @@ def cmd_new(env, ntype, name, today):
     fm = tmpl.format(today=today)
     path.write_text(f"---\n{fm}\n---\n# {name}\n", encoding="utf-8")
     print(f"✓ new {ntype}: {path.relative_to(env.vault)}")
+    for line in NEW_HINT.get(ntype, []):
+        print(f"  {line}")
+    print(f"  寫完跑 lumos lint {name}(單檔快檢標籤/格式)→ 全圖再 lumos doctor;完整規範見 lumos-project-notes skill")
     return 0
 
 
@@ -2537,6 +2744,9 @@ def main():
     p = sub.add_parser("contracts", help="合約登記簿 ★INVARIANT★/★DEBT★(全 vault 或單節點)")
     p.add_argument("note", nargs="?")
 
+    p = sub.add_parser("lint", help="單檔快檢:寫完一個節點立刻自驗標籤/格式(比 doctor 快,只看這篇)")
+    p.add_argument("note")
+
     g = sub.add_parser("guard", help="合約守衛 scaffold(對談驅動):列出未綁 / 套範本產 stub / 綁定")
     gsub = g.add_subparsers(dest="gcmd", required=True)
     gl = gsub.add_parser("list", help="列 ★INVARIANT★ 綁定狀態(real/dangling/fake/naked)")
@@ -2554,6 +2764,11 @@ def main():
     gb.add_argument("node")
     gb.add_argument("invariant", help="KEY 行子字串")
     gb.add_argument("method")
+    ga = gsub.add_parser("audit", help="留痕 [audit:模型/日期]:合法性經無脈絡獨立 agent 審計過(maker≠checker)")
+    ga.add_argument("node")
+    ga.add_argument("invariant", help="KEY 行子字串")
+    ga.add_argument("--model", default="sonnet", help="審計用的模型(預設 sonnet — 刻意較弱,不腦補補洞)")
+    ga.add_argument("--date", help="審計日期 YYYY-MM-DD(預設今天)")
     gt = gsub.add_parser("trace", help="合約→守衛測試→Verification 證據鏈(reverse:爆炸半徑可查)")
     gt.add_argument("node", nargs="?", help="限單節點(預設全 vault)")
 
@@ -2684,6 +2899,9 @@ def main():
                 return 2
         return cmd_contracts(env, rel)
 
+    if args.cmd == "lint":
+        return cmd_lint(env, args.note)
+
     if args.cmd == "guard":
         if args.gcmd == "list":
             return cmd_guard_list(env, unbound_only=args.unbound)
@@ -2693,6 +2911,8 @@ def main():
                                       template=args.template, klass=args.klass)
         if args.gcmd == "bind":
             return cmd_guard_bind(env, args.node, args.invariant, args.method)
+        if args.gcmd == "audit":
+            return cmd_guard_audit(env, args.node, args.invariant, args.model, args.date)
         if args.gcmd == "trace":
             return cmd_guard_trace(env, args.node)
 
