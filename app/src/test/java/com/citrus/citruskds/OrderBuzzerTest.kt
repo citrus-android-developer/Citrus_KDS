@@ -46,4 +46,10 @@ class OrderBuzzerTest {
     fun missingOrderNoteIsNoBuzzer() {
         assertNull(parse(""""x":0""").buzzerNo)
     }
+
+    @Test
+    fun trimsSurroundingWhitespace() {
+        // 去尾綴反斜線後再 trim：" 123\" → "123"
+        assertEquals("123", parse(""""OrderNote":" 123\\"""").buzzerNo)
+    }
 }
