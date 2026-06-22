@@ -971,6 +971,201 @@ def t_doctor_suggest():
     check("suggest: ASCII 詞界 — api 不命中 pos_api_auth", "提到「api」" not in r.stdout, r.stdout)
 
 
+def t_reversibility_lint():
+    v = mkvault()
+    write(v, "Systems/Mig.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★IRREVERSIBLE★ 跑 schema 遷移", body="# M\n")
+    r = run(v, "lint", "Systems/Mig")
+    check("lint: ★IRREVERSIBLE★ 缺回退 → rc1", r.returncode == 1 and "缺實質回退" in r.stdout, r.stdout)
+    write(v, "Systems/Mig2.md",
+          "type: system\nstatus: doing\n"
+          "decisions:\n  - content: 用樂觀鎖\n    decided: 2026-06-19\n"
+          "summary: |-\n  KEY:★IRREVERSIBLE★ 跑遷移 [rollback:decisions]", body="# M2\n")
+    r = run(v, "lint", "Systems/Mig2")
+    check("lint: [rollback:] 指到無實質 rollback → rc1", r.returncode == 1, r.stdout)
+    write(v, "Systems/Mig3.md",
+          "type: system\nstatus: doing\n"
+          "decisions:\n  - content: 用樂觀鎖\n    decided: 2026-06-19\n    rollback: 跑 revert_v4.sql\n"
+          "summary: |-\n  KEY:★IRREVERSIBLE★ 跑遷移 [rollback:decisions]", body="# M3\n")
+    r = run(v, "lint", "Systems/Mig3")
+    check("lint: irreversible 有實質回退 → rc0", r.returncode == 0, r.stdout)
+    write(v, "Systems/Cp.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★CHECKPOINT★ 部署 lab2", body="# C\n")
+    r = run(v, "lint", "Systems/Cp")
+    check("lint: ★CHECKPOINT★ 缺回退 → warning rc0", r.returncode == 0 and "建議補回退" in r.stdout, r.stdout)
+    write(v, "Issues/Bad.md",
+          "type: issue\nstatus: open\nsummary: |-\n  KEY:★IRREVERSIBLE★ 標錯地方", body="# B\n")
+    r = run(v, "lint", "Issues/Bad")
+    check("lint: 可逆性標記在非 Systems → rc1", r.returncode == 1 and "只能在 Systems" in r.stdout, r.stdout)
+
+
+def t_reversibility_doctor():
+    v = mkvault()
+    write(v, "Systems/Mig.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★IRREVERSIBLE★ 跑遷移", body="# M\n")
+    r = run(v, "doctor", "--ci")
+    check("doctor Check R: irreversible 缺回退 → rc1", r.returncode == 1 and "缺實質回退" in r.stdout, r.stdout)
+    v2 = mkvault()
+    write(v2, "Systems/Cp.md",
+          "type: system\nstatus: doing\nsummary: |-\n  KEY:★CHECKPOINT★ 部署 lab2", body="# C\n")
+    r2 = run(v2, "doctor", "--ci")
+    check("doctor Check R: 只有 checkpoint 缺回退 → rc0(warn_soft 不計 issues)", r2.returncode == 0, r2.stdout)
+
+
+def t_governance_log_write():
+    import subprocess as sp
+    root = Path(tempfile.mkdtemp(prefix="gctl-gov-"))
+    vault = root / "docs" / "kg"
+    for sub in ("Systems", "MOC"):
+        (vault / sub).mkdir(parents=True)
+    (vault / "MOC" / "i.md").write_text("---\ntype: moc\n---\n# i\n", encoding="utf-8")
+    (vault / "Systems" / "Mig.md").write_text(
+        "---\ntype: system\nstatus: doing\nsummary: |-\n  KEY:★IRREVERSIBLE★ 跑遷移\n---\n# M\n", encoding="utf-8")
+    sp.run(["git", "init", "-q"], cwd=str(root))
+    sp.run(["git", "add", "-A"], cwd=str(root))
+    sp.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], cwd=str(root))
+    try:
+        run(vault, "doctor", "--ci")
+        log = root / "docs" / ".governance-log.jsonl"
+        check("gov-log: --ci 寫入 governance-log", log.exists() and "check-r" in log.read_text(encoding="utf-8"), "未寫")
+        if log.exists():
+            log.unlink()
+        run(vault, "doctor")
+        check("gov-log: 純 doctor 不寫", not log.exists(), "不該寫")
+    finally:
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def t_gov_query():
+    root = Path(tempfile.mkdtemp(prefix="gctl-govq-"))
+    vault = root / "docs" / "kg"
+    (vault / "MOC").mkdir(parents=True)
+    (vault / "MOC" / "i.md").write_text("---\ntype: moc\n---\n# i\n", encoding="utf-8")
+    docs = root / "docs"
+    (docs / ".bypass-log.jsonl").write_text(
+        '{"ts":"2026-06-18T10:00:00","commit":"abc","subject":"skip graph"}\n', encoding="utf-8")
+    (docs / ".rot-queue.jsonl").write_text(
+        '{"ts":"2026-06-18T11:00:00","commit":"abc12","verification":"docs/kg/Verification/Foo.md","reason":"schema 變"}\n', encoding="utf-8")
+    (docs / ".governance-log.jsonl").write_text(
+        '{"ts":"2026-06-19T09:00:00","commit":"def","gate":"check-r","kind":"blocked","hard":true,"nodes":["OrderSvc"]}\n', encoding="utf-8")
+    try:
+        r = run(vault, "gov")
+        check("gov: 三來源合併", "check-r" in r.stdout and "skip graph" in r.stdout and "schema 變" in r.stdout, r.stdout)
+        r = run(vault, "gov", "OrderSvc")
+        check("gov <node>: 命中 governance-log 事件", "check-r" in r.stdout, r.stdout)
+        r = run(vault, "gov", "Foo")
+        check("gov <node>: stem 命中 rot-queue", "schema 變" in r.stdout, r.stdout)
+    finally:
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def t_marker_doc_sync():
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    skill = repo / "skills" / "lumos-project-notes" / "SKILL.md"
+    disc = repo / "scripts" / "templates" / "graph-discipline.md"
+    if not skill.exists() or not disc.exists():
+        check("drift: skills/template 不在(vendored)→ 跳過", True)
+        return
+    st, dt = skill.read_text(encoding="utf-8"), disc.read_text(encoding="utf-8")
+    for m in ("★CHECKPOINT★", "★IRREVERSIBLE★", "[rollback:"):
+        check(f"drift: {m} 在 SKILL.md", m in st, "SKILL 缺")
+        check(f"drift: {m} 在 graph-discipline", m in dt, "disc 缺")
+
+
+def t_canary():
+    import json as _j
+    import shutil
+    root = Path(tempfile.mkdtemp(prefix="gctl-can-"))
+    vault = root / "docs" / "kg"
+    (vault / "MOC").mkdir(parents=True)
+    (vault / "MOC" / "i.md").write_text("---\ntype: moc\n---\n# i\n", encoding="utf-8")
+    try:
+        r = run(vault, "canary", "record", "missed", "--auditor", "sonnet")
+        check("canary: record missed rc0", r.returncode == 0, r.stdout + r.stderr)
+        log = root / "docs" / ".canary-log.jsonl"
+        rec = _j.loads(log.read_text(encoding="utf-8").strip())
+        check("canary: 寫入含 token + missed",
+              rec.get("kind") == "missed" and rec.get("token", "").startswith("CANARY-"), str(rec))
+        r = run(vault, "gov")
+        check("canary: gov 顯示 canary/missed", "canary/missed" in r.stdout, r.stdout)
+        # 兩筆不同 token → gov 各一列(不被 dedup 折成一列)
+        run(vault, "canary", "record", "caught", "--token", "CANARY-A")
+        run(vault, "canary", "record", "caught", "--token", "CANARY-B")
+        r = run(vault, "gov")
+        check("canary: 不同 token 不被 dedup", r.stdout.count("canary/caught") == 2, r.stdout)
+        # 非法 kind → rc2(argparse choices)
+        r = run(vault, "canary", "record", "bogus")
+        check("canary: 非法 kind → rc2", r.returncode == 2, r.stdout + r.stderr)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def t_canary_loop_fields():
+    import json as _j
+    import shutil
+    root = Path(tempfile.mkdtemp(prefix="gctl-clf-"))
+    vault = root / "docs" / "kg"
+    (vault / "MOC").mkdir(parents=True)
+    (vault / "MOC" / "i.md").write_text("---\ntype: moc\n---\n# i\n", encoding="utf-8")
+    try:
+        r = run(vault, "canary", "record", "caught", "--loop", "L", "--severity", "major", "--token", "zz")
+        check("canary --loop/--severity: rc0", r.returncode == 0, r.stdout + r.stderr)
+        rec = _j.loads((root / "docs" / ".canary-log.jsonl").read_text(encoding="utf-8").strip())
+        check("canary --loop/--severity: 寫入 loop+severity",
+              rec.get("loop") == "L" and rec.get("severity") == "major", str(rec))
+        r = run(vault, "gov")
+        check("gov: canary detail 開頭含 loop=/sev=", "loop=L" in r.stdout and "sev=major" in r.stdout, r.stdout)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def t_loop_status():
+    import json as _j
+    import shutil
+    root = Path(tempfile.mkdtemp(prefix="gctl-loop-"))
+    vault = root / "docs" / "kg"
+    (vault / "MOC").mkdir(parents=True)
+    (vault / "MOC" / "i.md").write_text("---\ntype: moc\n---\n# i\n", encoding="utf-8")
+    log = root / "docs" / ".canary-log.jsonl"
+    n = [0]
+
+    def rec(loop, kind, sev=None):
+        n[0] += 1
+        d = {"ts": "2026-06-19T10:00:00", "kind": kind, "auditor": "sonnet",
+             "token": f"t{n[0]}", "note": ""}
+        if loop:
+            d["loop"] = loop
+        if sev:
+            d["severity"] = sev
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(_j.dumps(d) + "\n")
+
+    try:
+        r = run(vault, "loop", "status", "L")
+        check("loop status: 無記錄 → exit 1", r.returncode == 1, r.stdout + r.stderr)
+        rec("L", "caught", "clean"); rec("L", "caught", "minor")
+        r = run(vault, "loop", "status", "L")
+        check("loop status: 連2輪 caught+clean/minor → CONVERGED exit0",
+              r.returncode == 0 and "CONVERGED" in r.stdout, r.stdout)
+        rec("L", "caught", "major")
+        r = run(vault, "loop", "status", "L")
+        check("loop status: 最後一輪 major → 未收斂 exit1", r.returncode == 1, r.stdout)
+        rec("L", "caught", "clean"); rec("L", "caught", "clean")
+        r = run(vault, "loop", "status", "L")
+        check("loop status: tail-K 滑動,髒輪滑出 → CONVERGED", r.returncode == 0, r.stdout)
+        rec("M", "caught", "clean"); rec("M", "missed"); rec("M", "caught", "clean")
+        r = run(vault, "loop", "status", "M")
+        check("loop status: missed 在 tail-2 → 未收斂", r.returncode == 1, r.stdout)
+        rec("N", "caught"); rec("N", "caught")
+        r = run(vault, "loop", "status", "N")
+        check("loop status: 缺 severity → 未收斂", r.returncode == 1, r.stdout)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     print(f"lumos 測試({len(tests)} 案例)")

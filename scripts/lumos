@@ -329,13 +329,39 @@ def _suggest_systems_for_orphan(env, rel, n):
                   key=lambda x: (-x[1], -len(env.notes[x[0]].stem or "")))
 
 
-def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
+def _append_governance_log(vault, events):
+    """doctor --ci 唯一寫者:把本輪 gate findings append 到 docs/.governance-log.jsonl。
+    非 git / 取不到 HEAD → 跳過(不報錯)。dedup 留給讀時(lumos gov)。"""
+    if not events:
+        return
+    import json
+    import datetime
+    import subprocess
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                                capture_output=True, text=True, cwd=str(vault)).stdout.strip()
+    except Exception:
+        commit = ""
+    if not commit:
+        return
+    ts = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    path = vault.parent / ".governance-log.jsonl"
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            for e in events:
+                f.write(json.dumps({"ts": ts, "commit": commit, **e}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def run_doctor(env: Env, strict: bool, color: bool, suggest=False, ci=False):
     C = {k: (v if color else "") for k, v in
          dict(R="\033[31m", Y="\033[33m", G="\033[32m", B="\033[1m", X="\033[0m").items()}
     notes, by_stem, resolve = env.notes, env.by_stem, env.resolve
     print(f"{C['B']}lumos doctor{C['X']} — vault: {C['B']}{env.vault}{C['X']} (self-contained, no Obsidian)")
     print()
     issues = 0
+    gov_events = []          # 本輪 gate findings → governance-log(--ci 才寫)
 
     def section(idx, title):
         print(f"{C['B']}[{idx}]{C['X']} {title}")
@@ -351,6 +377,14 @@ def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
         if advice:
             print(f"  {C['B']}建議動作{C['X']}: {advice}")
         issues += len(lines)
+
+    def warn_soft(lines, head, advice=None):
+        # 軟提醒:印出但不動 issues → 不影響 rc(R3-MAJOR-3)
+        print(f"  {C['Y']}⚠{C['X']} {head}")
+        for l in lines:
+            print(f"      • {l}")
+        if advice:
+            print(f"  {C['B']}建議{C['X']}: {advice}")
 
     collisions = {s: rs for s, rs in by_stem.items() if len(rs) > 1}
 
@@ -580,6 +614,35 @@ def run_doctor(env: Env, strict: bool, color: bool, suggest=False):
                  "派一個無對話脈絡的乾淨 agent 判合法性(別餵你的結論),過了用 "
                  "`lumos guard audit <node> \"<KEY 行子字串>\"` 留痕")
     print()
+
+    # Check R: 可逆性回退綁定(★IRREVERSIBLE★ 動手前要有實質回退;★CHECKPOINT★ 軟提醒)
+    section("R", "可逆性回退綁定 (★IRREVERSIBLE★ 動手前要有實質回退)")
+    rev_err, rev_soft = [], []
+    for rel, nnote in sorted(notes.items()):
+        for marker, clean, ref in extract_reversibility(nnote):
+            t_ = nnote.fields.get("type")
+            if t_ != "system":
+                rev_err.append(f"{rel}: {marker} 標在非 Systems(type={t_!r})")
+                gov_events.append({"gate": "check-r", "kind": "blocked", "hard": True, "nodes": [nnote.stem]})
+            elif not _rollback_resolved(nnote, ref):
+                if marker == "★IRREVERSIBLE★":
+                    rev_err.append(f"{rel}: {first_line(clean, 60)}")
+                    gov_events.append({"gate": "check-r", "kind": "blocked", "hard": True, "nodes": [nnote.stem]})
+                else:
+                    rev_soft.append(f"{rel}: {first_line(clean, 60)}")
+                    gov_events.append({"gate": "check-r", "kind": "warned", "hard": False, "nodes": [nnote.stem]})
+    if not rev_err and not rev_soft:
+        ok("無未綁回退的可逆性標記")
+    if rev_err:
+        warn(rev_err, f"發現 {len(rev_err)} 條 ★IRREVERSIBLE★ 缺實質回退/標錯型別:",
+             "標記行加 [rollback:decisions] 且 decisions[] 寫非空 rollback;★ 僅用於 Systems")
+    if rev_soft:
+        warn_soft(rev_soft, f"{len(rev_soft)} 條 ★CHECKPOINT★ 建議補回退(不擋):",
+                  "加 [rollback:decisions] + decisions rollback")
+    print()
+
+    if ci:
+        _append_governance_log(env.vault, gov_events)
 
     print(f"{C['B']}─────────────────────────────────{C['X']}")
     if issues == 0:
@@ -859,6 +922,40 @@ def strip_test_refs(inv_text):
     return INV_TAG_RE.sub("", inv_text).strip(), invariant_test_refs(inv_text)
 
 
+# ── 可逆性軸(獨立於 ★INVARIANT★ 合約軸;走平行函式,不碰 extract_contracts/INV_TAG_RE)──
+CHECKPOINT_RE = re.compile(r"^KEY:\s*(?:\([^)]*\)\s*)?★CHECKPOINT★\s*(.*)")
+IRREVERSIBLE_RE = re.compile(r"^KEY:\s*(?:\([^)]*\)\s*)?★IRREVERSIBLE★\s*(.*)")
+ROLLBACK_REF_RE = re.compile(r"\[rollback:\s*([^\]]+)\]")
+
+
+def reversibility_rollback_ref(text):
+    m = ROLLBACK_REF_RE.search(text)
+    return m.group(1).strip() if m else None
+
+
+def extract_reversibility(note):
+    """從 summary KEY 行抽 (marker, 去 [rollback:] 的乾淨文字, rollback_ref)。"""
+    summ = note.fields.get("summary")
+    out = []
+    if isinstance(summ, str):
+        for raw in summ.split("\n"):
+            line = raw.strip()
+            for marker, rx in (("★CHECKPOINT★", CHECKPOINT_RE), ("★IRREVERSIBLE★", IRREVERSIBLE_RE)):
+                m = rx.match(line)
+                if m:
+                    body = m.group(1)
+                    out.append((marker, ROLLBACK_REF_RE.sub("", body).strip(),
+                                reversibility_rollback_ref(body)))
+    return out
+
+
+def _rollback_resolved(note, ref):
+    """[rollback:decisions] 視為已解析 ⟺ 本節點 decisions[] 有 ≥1 條非空 rollback。"""
+    if not ref or ref.strip().lower() != "decisions":
+        return False
+    return any(str(d.get("rollback", "")).strip() for d in parse_decisions(note.fm_lines))
+
+
 def build_code_haystack(repo_root):
     """讀 repo 內所有 code 檔串成大字串,供 ★INVARIANT★ 綁定的測試名做存在性檢查。
     (閉環外接觸:doctor 不執行測試,只驗證『載重宣稱認領的證據真的存在於程式碼』)"""
@@ -975,6 +1072,16 @@ def cmd_lint(env, node):
         elif not invariant_audit_refs(inv):
             errs.append(f"★INVARIANT★ 綁了測試但未獨立審計(缺 [audit:],pre-push 會擋):{first_line(clean, 48)}")
 
+    # Check R 單檔版:可逆性回退綁定 + 標錯型別
+    for marker, rclean, ref in extract_reversibility(n):
+        if t != "system":
+            errs.append(f"{marker} 只能在 Systems 節點(本節點 type={t!r}):{first_line(rclean, 40)}")
+        elif not _rollback_resolved(n, ref):
+            if marker == "★IRREVERSIBLE★":
+                errs.append(f"{marker} 缺實質回退(行尾加 [rollback:decisions],decisions[] 要有非空 rollback):{first_line(rclean, 40)}")
+            else:
+                warns.append(f"{marker} 建議補回退([rollback:decisions]):{first_line(rclean, 40)}")
+
     if not errs and not warns:
         print(f"✓ lint {rel} — 0 問題")
         return 0
@@ -986,6 +1093,142 @@ def cmd_lint(env, node):
     print(f"\n{len(errs)} error / {len(warns)} warning"
           + ("" if errs else "(warning 不阻擋,但建議補)"))
     return 1 if errs else 0
+
+
+def cmd_gov(env, node=None, since_days=90):
+    """唯讀彙整 bypass-log/rot-queue/governance-log → 治理事件時間軸 / 某節點被哪幾道閘攔過。
+    本機開發可見性工具(非合規物)。L2 無 node、L3 以 Verification 為鍵 → 對 Systems 為部分視圖。"""
+    import json
+    import datetime
+    docs = env.vault.parent
+    cutoff = (datetime.date.today() - datetime.timedelta(days=since_days)).isoformat()
+
+    def stem(s):
+        return Path(str(s)).stem.lower()
+
+    rows = []
+
+    def load(name, mapper):
+        p = docs / name
+        if not p.exists():
+            return
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(mapper(json.loads(line)))
+            except (ValueError, KeyError):
+                continue
+
+    load(".bypass-log.jsonl", lambda d: {"ts": d.get("ts", ""), "commit": d.get("commit", ""),
+         "gate": "L2", "kind": "bypassed", "hard": False, "nodes": [], "detail": d.get("subject", "")})
+    load(".rot-queue.jsonl", lambda d: {"ts": d.get("ts", ""), "commit": d.get("commit", ""),
+         "gate": "L3", "kind": "warned", "hard": False, "nodes": [stem(d.get("verification", ""))],
+         "detail": d.get("reason", "")})
+    load(".governance-log.jsonl", lambda d: {"ts": d.get("ts", ""), "commit": d.get("commit", ""),
+         "gate": d.get("gate", "?"), "kind": d.get("kind", "?"), "hard": bool(d.get("hard")),
+         "nodes": [stem(x) for x in d.get("nodes", [])], "detail": ""})
+    # 第 4 源:canary 審計留痕(審計員可靠度史)。只此 mapper 輸出 token 鍵(供 dedup 鑑別)。
+    load(".canary-log.jsonl", lambda d: {"ts": d.get("ts", ""), "commit": "",
+         "gate": "canary", "kind": d.get("kind", "?"), "hard": False, "nodes": [],
+         "token": d.get("token", ""),
+         "detail": ((f"loop={d['loop']} sev={d.get('severity', '?')} · " if d.get("loop") else "")
+                    + (d.get("auditor", "") + " " + d.get("note", "")).strip())})
+
+    rows = [r for r in rows if (r["ts"][:10] or "9999") >= cutoff]
+    seen, ded = set(), []
+    for r in sorted(rows, key=lambda r: r["ts"]):
+        # canary 每筆 token 唯一 → 加 token 當第 5 鑑別子(舊三源無此鍵,.get 回 "");必須用 .get 不可 r["token"]
+        k = (r["commit"], frozenset(r["nodes"]), r["gate"], r["kind"], r.get("token", ""))
+        if k in seen:
+            continue
+        seen.add(k)
+        ded.append(r)
+    if node:
+        q = stem(node)
+        ded = [r for r in ded if q in r["nodes"]]
+    for r in ded:
+        mark = "硬擋" if r["hard"] else "軟"
+        print(f"{r['ts'][:10]} [{r['gate']}/{r['kind']}/{mark}] {','.join(r['nodes']) or '-'}  {r['detail'][:50]}")
+    if node:
+        print("\n(註:L2 繞過無 node、L3 以 Verification 為鍵;對 Systems 節點為部分視圖)")
+    print(f"\n{len(ded)} 筆(近 {since_days} 天)")
+    return 0
+
+
+def cmd_canary(env, kind, auditor=None, token=None, note=None, loop=None, severity=None):
+    """記一筆 canary 審計留痕(test-the-tester):某輪對抗審計有沒有抓到植入瑕疵。
+    record-only、本機;漏抓(missed)= 該輪審計員放水的訊號,經 lumos gov 可查詢。
+    --loop/--severity:把這輪歸進某設計 loop(供 lumos loop status 算收斂)。
+    天花板:這只證明「審計員有沒有醒著讀」,不證明它抓到所有真問題(見設計 doc)。"""
+    import json
+    import datetime
+    import secrets
+    if not token:
+        token = "CANARY-" + secrets.token_hex(4)   # 隨機,非時間戳(同秒不撞)
+    rec = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+           "kind": kind, "auditor": auditor or "", "token": token, "note": note or ""}
+    if loop:
+        rec["loop"] = loop
+    if severity:
+        rec["severity"] = severity
+    path = env.vault.parent / ".canary-log.jsonl"
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"ERROR: 寫入 {path} 失敗: {e}", file=sys.stderr)
+        return 2
+    print(f"✓ canary {kind} 留痕: {token}" + (f" (auditor={auditor})" if auditor else ""))
+    return 0
+
+
+def cmd_loop_status(env, loop_id, need=2):
+    """算某設計 loop 的收斂(收斂留痕):連 K 輪『canary caught 且 severity∈{clean,minor}』。
+    讀 .canary-log.jsonl 的 **append 序**(不 ts-sort:ts 只到秒、同秒會並列),篩 loop==id。
+    tail-K 滑動窗:前面髒輪不影響、只看最後 K 筆;missed/缺 severity 視同未收斂。
+    exit 0=CONVERGED / 1=未收斂(含無記錄=還沒開始)/ 2=真錯誤。
+    天花板:收斂=連 K 輪醒著的審計員沒找到 blocker/major,非完整正確;severity 自報(見設計 doc)。"""
+    import json
+    need = max(1, need)
+    path = env.vault.parent / ".canary-log.jsonl"
+    rounds = []
+    try:
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("loop") == loop_id:
+                    rounds.append(d)
+    except OSError as e:
+        print(f"ERROR: 讀 {path} 失敗: {e}", file=sys.stderr)
+        return 2
+
+    def good(r):
+        return r.get("kind") == "caught" and r.get("severity") in ("clean", "minor")
+
+    converged = len(rounds) >= need and all(good(r) for r in rounds[-need:])
+    streak = 0                                  # 從尾往回的連續合格數(算「還需 N」)
+    for r in reversed(rounds):
+        if good(r):
+            streak += 1
+        else:
+            break
+    if converged:
+        print(f"✅ CONVERGED ({loop_id}, 連 {need} 輪 caught+乾淨;共 {len(rounds)} 輪)")
+        rc = 0
+    else:
+        print(f"⏳ 還需 {need - streak} 輪乾淨 ({loop_id}, 已 {len(rounds)} 輪)")
+        rc = 1
+    for i, r in enumerate(rounds, 1):           # 留痕:每輪一行 tab 分隔
+        print(f"{i}\t{r.get('kind', '?')}\t{r.get('severity', '-')}\t{r.get('ts', '')}\t{r.get('note', '')}")
+    return rc
 
 
 # ───────────── guard: 合約守衛 scaffold(對談驅動)─────────────
@@ -2367,6 +2610,7 @@ NEW_HINT = {
         "填 summary 符號行: FLOW:<流程 a→b→c>  KEY:<關鍵概念/欄位>  DEP:[[依賴模組]]  TEST:<測試狀態>",
         "合約用 KEY 行前綴: ★INVARIANT★=業務合約(改=breaking),必綁 [test:測試名] 再經獨立 [audit:];★DEBT★=偶然可改",
         "  └ 綁定別手寫: lumos guard bind <node> \"<KEY子字串>\" <測試名> / guard audit <node> \"<KEY子字串>\"",
+        "可逆性: 不可逆動作(prod遷移/上架)標 ★IRREVERSIBLE★ + [rollback:decisions];改了難救標 ★CHECKPOINT★",
     ],
     "issue": [
         "填 summary 符號行: FLAG:<TECHNICAL/DECISION/ORIGIN>  DECISION:<決策簡述>  KEY:<關鍵發現>",
@@ -2747,6 +2991,27 @@ def main():
     p = sub.add_parser("lint", help="單檔快檢:寫完一個節點立刻自驗標籤/格式(比 doctor 快,只看這篇)")
     p.add_argument("note")
 
+    p = sub.add_parser("gov", help="唯讀治理事件帳:時間軸 / 某節點歷來被哪幾道閘攔過")
+    p.add_argument("node", nargs="?")
+    p.add_argument("--since", type=int, default=90, help="近 N 天(預設 90)")
+
+    cp = sub.add_parser("canary", help="審計員 canary 留痕(test-the-tester):某輪對抗審計有沒有抓到植入瑕疵")
+    csub = cp.add_subparsers(dest="ccmd", required=True)
+    cr = csub.add_parser("record", help="記一筆 caught|missed")
+    cr.add_argument("kind", choices=("caught", "missed"))
+    cr.add_argument("--auditor", help="審計用的模型(如 sonnet)")
+    cr.add_argument("--token", help="canary token(不給則自動鑄 CANARY-<隨機>)")
+    cr.add_argument("--note", help="備註")
+    cr.add_argument("--loop", help="把這輪歸進某設計 loop(供 lumos loop status 算收斂)")
+    cr.add_argument("--severity", choices=("clean", "minor", "major", "blocker"),
+                    help="這輪審計員找到的最嚴重 finding(忠實轉錄)")
+
+    lp = sub.add_parser("loop", help="審計 loop 收斂查詢(消費 canary-log 的 --loop 記錄)")
+    lsub = lp.add_subparsers(dest="lcmd", required=True)
+    ls = lsub.add_parser("status", help="算某 loop 收斂:連 K 輪 caught 且無 blocker/major")
+    ls.add_argument("loop_id")
+    ls.add_argument("--need", type=int, default=2, help="連續乾淨輪數 K(預設 2)")
+
     g = sub.add_parser("guard", help="合約守衛 scaffold(對談驅動):列出未綁 / 套範本產 stub / 綁定")
     gsub = g.add_subparsers(dest="gcmd", required=True)
     gl = gsub.add_parser("list", help="列 ★INVARIANT★ 綁定狀態(real/dangling/fake/naked)")
@@ -2867,7 +3132,7 @@ def main():
 
     if args.cmd == "doctor":
         color = sys.stdout.isatty() and not args.ci
-        return run_doctor(env, strict=(args.strict or args.ci), color=color, suggest=args.suggest)
+        return run_doctor(env, strict=(args.strict or args.ci), color=color, suggest=args.suggest, ci=args.ci)
 
     if args.cmd in ("links", "backlinks", "context", "map") or \
        (args.cmd == "decisions" and not args.superseded):
@@ -2901,6 +3166,16 @@ def main():
 
     if args.cmd == "lint":
         return cmd_lint(env, args.note)
+
+    if args.cmd == "gov":
+        return cmd_gov(env, args.node, args.since)
+
+    if args.cmd == "canary":
+        return cmd_canary(env, args.kind, args.auditor, args.token, args.note, args.loop, args.severity)
+
+    if args.cmd == "loop":
+        if args.lcmd == "status":
+            return cmd_loop_status(env, args.loop_id, args.need)
 
     if args.cmd == "guard":
         if args.gcmd == "list":
