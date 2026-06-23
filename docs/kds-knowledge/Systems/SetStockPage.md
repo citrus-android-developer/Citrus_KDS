@@ -2,13 +2,13 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-08
+updated: 2026-06-23
 tags:
   - type/system
   - status/done
 summary: |-
   FLOW:LoadStockList→getStockInfo→點品項→setSellStatus兩階段(local→remote)→remote失敗回滾local
-  KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解),remote改送精簡body(StoreNo/GKID/GID/Status)且Status映射SoldOut→NotAvailable(local仍full body+SoldOut)
+  KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解),remote改送精簡body(StoreNo/GKID/GID/Status)且Status映射SoldOut→NotAvailable(local仍full body+SoldOut)｜2026-06-23 StockItem名稱後顯示Size「名稱 (S)」(stockNameWithSize,Size空或佔位符"."不附)｜⚠同名品項可能跨不同GoodsKind/GID,Size相同時(如多個Pilot Stick皆".")仍無法用Size分辨,要看分類
   DEP:[[POS-API端點]][[KDS訂單管理]][[Prefs偏好設定]][[SetSellStatus-Remote串接]]
 verified_by:
   - "[[Verification/2026-06-05_損耗功能端到端]]"
