@@ -2,13 +2,13 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-05
+updated: 2026-06-23
 tags:
   - type/system
   - status/done
 summary: |-
   FLOW:OrderReadyScreen→LaunchedEffect→startFetchOrderReadyInfo→3秒輪詢POST /controller/OrdersList→更新orderReadyList
-  KEY:無body/無query,/controller/路徑非/KDS/,POS端決定分組,OrderReadyInfo(OrderName+OrderNo陣列)
+  KEY:無body/無query,/controller/路徑非/KDS/,POS端決定分組,OrderReadyInfo(OrderName+OrderNo陣列)｜震動器號碼由後端OrderReadyDAL.FormatDisplay附在單號字串「前3-後4 (號碼)」,前端原樣顯示不另處理｜★後端bug已修(2026-06-22):6/3 commit 46c1d05把SQL alias連同DB欄位改成OrderNote,但OrderReadyItem屬性是Note→Dapper映不到→取餐牆永遠不附號碼;修正alias回Note+取反斜線前Split('\\')[0](★OrderNote格式=<震動器號碼>\<支付狀態>,反斜線是分隔符非尾綴;反斜線後是支付閘道狀態如2C2PFail:2001,不可顯示給客人;E線上付款單常無震動器只有支付狀態)(後端Compass_KDS,已隨e.Message同DLL部署)
   CAP:電視牆不可捲動,每組顯示數=TextMeasurer動態量測(行數×每行個數,用最寬字串保守不裁切),店少列高→顯示更多,store多→自動收回;take(capacity)
   ORIENT:方向由設定頁prefs.orderReadyOrientation(0橫/1直)鎖定,isPortrait切換fontMul(0.36/0.27)+fontFloor(13/10),直立字小
   SORT:後端Finishtime DESC(最新前面),前端維持序取最新N個;單號粗體(FontWeight.Bold)
