@@ -20,7 +20,16 @@ data class StockInfo(
     var sellStatus: String?,
     @Json(name = "Size")
     var size: String?,
+    @Json(name = "SizeEN")
+    var sizeEn: String? = null,
 )
+
+/**
+ * 依系統語言挑規格顯示值：英文模式用 sizeEn(後端 SizeDesc.GName2)、否則用 size(中文/原始)。
+ * 英文 size 為空時 fallback 回原始 size。
+ */
+fun stockDisplaySize(language: String?, size: String?, sizeEn: String?): String? =
+    if (language == "English") sizeEn?.takeIf { it.isNotBlank() } ?: size else size
 
 /**
  * 庫存品項顯示名稱：名稱後接 Size「名稱 (S)」，讓同名不同 Size 的品項可分辨。

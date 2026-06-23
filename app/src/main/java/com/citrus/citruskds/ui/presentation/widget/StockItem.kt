@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.StockInfo
+import com.citrus.citruskds.commonData.vo.stockDisplaySize
 import com.citrus.citruskds.commonData.vo.stockNameWithSize
 import com.citrus.citruskds.di.MyApplication.Companion.prefs
 import com.citrus.citruskds.ui.theme.StockGrayText
@@ -68,7 +69,8 @@ fun StockItem(
     var qty by remember(stockInfo.gID, stockInfo.gKID) { mutableIntStateOf(0) }
     val rawName = if (prefs?.language == "English") stockInfo.eName ?: stockInfo.cName ?: ""
     else stockInfo.cName ?: stockInfo.eName ?: ""
-    val name = stockNameWithSize(rawName, stockInfo.size)   // 名稱後接 Size「名稱 (S)」,同名不同規格可分辨
+    // 名稱後接 Size「名稱 (S)」,同名不同規格可分辨;英文模式用英文規格(SizeEN)
+    val name = stockNameWithSize(rawName, stockDisplaySize(prefs?.language, stockInfo.size, stockInfo.sizeEn))
     val category = (if (prefs?.language == "English") stockInfo.gKEName else stockInfo.gKCName)
         ?.uppercase() ?: ""
 
