@@ -13,8 +13,8 @@ android {
         applicationId = "com.citrus.citruskds"
         minSdk = 24
         targetSdk = 34
-        versionCode = 24
-        versionName = "1.1.13"
+        versionCode = 25
+        versionName = "1.1.14"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
