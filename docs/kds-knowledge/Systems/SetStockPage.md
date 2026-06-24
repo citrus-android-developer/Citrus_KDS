@@ -2,13 +2,13 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-23
+updated: 2026-06-24
 tags:
   - type/system
   - status/done
 summary: |-
   FLOW:LoadStockList→getStockInfo→點品項→setSellStatus兩階段(local→remote)→remote失敗回滾local
-  KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解),remote改送精簡body(StoreNo/GKID/GID/Status)且Status映射SoldOut→NotAvailable(local仍full body+SoldOut)｜2026-06-23 StockItem名稱後顯示Size「名稱 (S)」(stockNameWithSize,Size空或佔位符"."不附);英文模式用英文規格(stockDisplaySize選sizeEn,後端InventoryList JOIN SizeDesc回SizeEN:小→S中→M大→L Mix→MIX,缺則fallback原始)｜⚠同名品項可能跨不同GoodsKind/GID,Size相同時(如多個Pilot Stick皆".")仍無法用Size分辨,要看分類
+  KEY:不輪詢只在進入時抓一次,本地樂觀更新+遠端失敗回滾,OnSetInventory死碼(內容已註解),remote改送精簡body(StoreNo/GKID/GID/Status)且Status映射SoldOut→NotAvailable(local仍full body+SoldOut)｜2026-06-23 StockItem名稱後顯示Size「名稱 (S)」(stockNameWithSize,Size空或佔位符"."不附);英文模式用英文規格(stockDisplaySize選sizeEn,後端InventoryList JOIN SizeDesc回SizeEN:小→S中→M大→L Mix→MIX,缺則fallback原始)｜2026-06-24 品項名/分類名語系空白fallback(stockName:該語系空白→顯示另一語系,原`?:`只擋null不擋空字串故英文名為''時顯示空白)｜⚠同名品項可能跨不同GoodsKind/GID,Size相同時(如多個Pilot Stick皆".")仍無法用Size分辨,要看分類
   DEP:[[POS-API端點]][[KDS訂單管理]][[Prefs偏好設定]][[SetSellStatus-Remote串接]]
 verified_by:
   - "[[Verification/2026-06-05_損耗功能端到端]]"

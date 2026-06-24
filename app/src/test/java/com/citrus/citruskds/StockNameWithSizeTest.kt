@@ -1,6 +1,7 @@
 package com.citrus.citruskds
 
 import com.citrus.citruskds.commonData.vo.stockDisplaySize
+import com.citrus.citruskds.commonData.vo.stockName
 import com.citrus.citruskds.commonData.vo.stockNameWithSize
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -41,5 +42,20 @@ class StockNameWithSizeTest {
     fun englishFallsBackWhenNoSizeEn() {
         assertEquals("中", stockDisplaySize("English", "中", null)) // 英文規格缺 → fallback 原始
         assertEquals("中", stockDisplaySize("English", "中", ""))
+    }
+
+    // --- 名稱語系空白 fallback ---
+    @Test
+    fun nameUsesSelectedLanguage() {
+        assertEquals("coffee", stockName("English", "coffee", "咖啡"))
+        assertEquals("咖啡", stockName("华文", "coffee", "咖啡"))
+    }
+
+    @Test
+    fun nameFallsBackWhenSelectedLangBlank() {
+        assertEquals("咖啡", stockName("English", "", "咖啡"))     // 英文空 → 用中文
+        assertEquals("咖啡", stockName("English", "   ", "咖啡"))  // 空白也算空
+        assertEquals("咖啡", stockName("English", null, "咖啡"))
+        assertEquals("coffee", stockName("华文", "coffee", ""))    // 中文空 → 用英文
     }
 }

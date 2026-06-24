@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.StockInfo
 import com.citrus.citruskds.commonData.vo.stockDisplaySize
+import com.citrus.citruskds.commonData.vo.stockName
 import com.citrus.citruskds.commonData.vo.stockNameWithSize
 import com.citrus.citruskds.di.MyApplication.Companion.prefs
 import com.citrus.citruskds.ui.theme.StockGrayText
@@ -67,12 +68,10 @@ fun StockItem(
 ) {
     val isAvailable = stockInfo.sellStatus == "Available"
     var qty by remember(stockInfo.gID, stockInfo.gKID) { mutableIntStateOf(0) }
-    val rawName = if (prefs?.language == "English") stockInfo.eName ?: stockInfo.cName ?: ""
-    else stockInfo.cName ?: stockInfo.eName ?: ""
+    val rawName = stockName(prefs?.language, stockInfo.eName, stockInfo.cName)   // 該語系名稱空白時 fallback 另一語系
     // 名稱後接 Size「名稱 (S)」,同名不同規格可分辨;英文模式用英文規格(SizeEN)
     val name = stockNameWithSize(rawName, stockDisplaySize(prefs?.language, stockInfo.size, stockInfo.sizeEn))
-    val category = (if (prefs?.language == "English") stockInfo.gKEName else stockInfo.gKCName)
-        ?.uppercase() ?: ""
+    val category = stockName(prefs?.language, stockInfo.gKEName, stockInfo.gKCName).uppercase()   // 分類名同樣空白 fallback
 
     Card(
         colors = CardDefaults.cardColors(containerColor = if (isAvailable) Color.White else StockPinkCard),
