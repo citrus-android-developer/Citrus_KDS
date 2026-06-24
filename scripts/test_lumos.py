@@ -1166,6 +1166,37 @@ def t_loop_status():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def t_check_k():
+    # Check K: ★COMBO★ 鐵則只綁 1 個 [test:] → 軟提醒補組合(warn_soft,不擋)
+    v = mkvault()
+    write(v, "Systems/Thin.md",
+          "type: system\nstatus: done\nsummary: |-\n  KEY:★INVARIANT★ 不可超賣 ★COMBO★ [test:OverbookHappy]",
+          body="# Thin\n")
+    r = run(v, "doctor")
+    check("Check K: ★COMBO★ 綁 1 標記 → 提醒補組合", "happy-path" in r.stdout, r.stdout)
+
+    # 綁 2 個 [test:] 標記 → 不提醒
+    v2 = mkvault()
+    write(v2, "Systems/Two.md",
+          "type: system\nstatus: done\nsummary: |-\n  KEY:★INVARIANT★ 不可超賣 ★COMBO★ [test:Happy] [test:Combo]",
+          body="# Two\n")
+    check("Check K: ★COMBO★ 綁 2 標記 → 不提醒", "happy-path" not in run(v2, "doctor").stdout)
+
+    # 無 ★COMBO★ → 不提醒
+    v3 = mkvault()
+    write(v3, "Systems/NoCombo.md",
+          "type: system\nstatus: done\nsummary: |-\n  KEY:★INVARIANT★ 不可超賣 [test:Happy]",
+          body="# NoCombo\n")
+    check("Check K: 無 ★COMBO★ → 不提醒", "happy-path" not in run(v3, "doctor").stdout)
+
+    # F1: [test:a,b] 單逗號標記算 1 個 → 仍提醒(免繞過)
+    v4 = mkvault()
+    write(v4, "Systems/Comma.md",
+          "type: system\nstatus: done\nsummary: |-\n  KEY:★INVARIANT★ 不可超賣 ★COMBO★ [test:HappyA,HappyB]",
+          body="# Comma\n")
+    check("Check K F1: [test:a,b] 算 1 標記 → 仍提醒(免逗號繞過)", "happy-path" in run(v4, "doctor").stdout)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     print(f"lumos 測試({len(tests)} 案例)")
