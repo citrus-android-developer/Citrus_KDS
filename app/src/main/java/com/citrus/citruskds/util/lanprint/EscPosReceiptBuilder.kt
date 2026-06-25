@@ -35,9 +35,9 @@ object EscPosReceiptBuilder {
 
         feed(out, 1)
 
-        // 放大字：KDS ID + 單號
+        // 放大字：KDS 群組名稱(空則 fallback 印 KDS_ID) + 單號
         size(out, double = true)
-        text(out, "${prefs.kdsId}\n")
+        text(out, (order.kdsName?.ifBlank { null } ?: prefs.kdsId) + "\n")
         text(out, "No. ".orCh("单号 ") + order.orderNo + "\n")
 
         feed(out, 1)

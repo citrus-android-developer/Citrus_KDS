@@ -16,6 +16,8 @@ data class Order(
     var status: String,
     @Json(name = "OrderNote")
     var note: String? = null,
+    @Json(name = "KDSName")
+    var kdsName: String? = null,   // 列印群組名稱(後端 PrintGroup.Name),收據開頭顯示用,空則 fallback prefs.kdsId
     @Json(ignore = true)
     var isVisible: Boolean = true,
     /** 列印標記：此份為「加點單」(只含新增品項，標題印「加點」)。非 API 欄位 */
