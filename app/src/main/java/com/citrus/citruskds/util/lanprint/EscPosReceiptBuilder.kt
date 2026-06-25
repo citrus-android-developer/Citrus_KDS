@@ -47,7 +47,7 @@ object EscPosReceiptBuilder {
         val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
         text(out, "Order time:".orCh("点单时间:") + order.orderTime + "\n")
         text(out, "Print time:".orCh("打印时间:") + now + "\n")
-        text(out, "------------------------------\n")
+        text(out, receiptDashLine(prefs.printerIs80mm) + "\n")
 
         // 放大字：品項
         size(out, double = true)
@@ -68,7 +68,7 @@ object EscPosReceiptBuilder {
 
         // 正常字：分隔線 + 總計
         size(out, double = false)
-        text(out, "------------------------------\n")
+        text(out, receiptDashLine(prefs.printerIs80mm) + "\n")
         text(out, "Total sum: ".orCh("总计: ") + order.detail.size + "\n")
 
         // 進紙 + 切紙
@@ -127,3 +127,6 @@ object EscPosReceiptBuilder {
     private fun feed(out: ByteArrayOutputStream, n: Int) =
         out.write(byteArrayOf(ESC.toByte(), 'd'.code.toByte(), n.toByte()))
 }
+
+/** 收據分隔線：填滿紙寬。80mm 正常字級每行 48 字、58mm 32 字。 */
+internal fun receiptDashLine(is80mm: Boolean): String = "-".repeat(if (is80mm) 48 else 32)
