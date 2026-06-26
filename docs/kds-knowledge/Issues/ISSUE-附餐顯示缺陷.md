@@ -38,13 +38,13 @@ for (element in middleList) {
 - 觀察：W01-00004 在 KDS 01 一個品項都不顯示——該單兩筆都是 GType=R，無 G 主項。
 - **2026-06-17 結論（使用者確認）**：這是**設定問題已排除**，非前端顯示邏輯缺陷。亦即正常設定下不會出現「附餐無對應套餐主項」的拆站情形，`filter { !it.isSideDish }` 的前提（附餐必有同站主項）成立 → 不需改前端。
 
-## 缺陷 3：附餐不顯示調味加料（KITCHEN_IMPACT，2026-06-26 發現，待修）
+## 缺陷 3：附餐不顯示調味加料（KITCHEN_IMPACT，2026-06-26 發現，已結案）
 
 `OrderItem.kt:186-193` 巢狀渲染附餐只印 `middleItemLine(element.qty, element.displayName())`（= `- {qty} x {名稱}`），**沒接 `flavorDisplay`/`additionDisplay`**。而主項那段（`OrderItem.kt:133-136`）有印 `#調味 #加料`。
 - **實機觀察（03 單 E012026062600003）**：附餐蘑菇義大利麵(S) 後端回 `Flavor=辣/spicy, Addition=多麵*2,少麵*1`，但卡片只顯示 `- 2 x 蘑菇義大利麵`，調味加料消失。一般品項(N)的調味加料正常顯示。
 - **跨路徑**：列印 `EscPosReceiptBuilder.kt` 攤平印 `order.detail`，附餐也走 `#flavor #addition` → **列印有印、卡片沒印**，又是 card≠print 不一致（與缺陷1完全對稱的破口）。取餐牆不印品項，不涉及。
 - **修法**：附餐渲染比照主項接上 `flavorDisplay/additionDisplay`，抽 helper + 單元測試（同缺陷1套路）。後端不用動。
-- **已修（2026-06-26，code+test，待實機驗）**：`middleItemLine(qty,name,flavor="",addition="")` 加可選調味/加料參數（空則格式不變、不回歸）→ `OrderItem.kt:186-198` 呼叫時帶入 `element.flavorDisplay/additionDisplay(prefs.itemDisplayLan)`。`SideDishLineTest` 補 4 例（空不變 / 只調味 / 只加料 / 兩者），6 測全綠。
+- **已修並實機驗證通過（2026-06-26，1.1.17）**：`middleItemLine(qty,name,flavor="",addition="")` 加可選調味/加料參數（空則格式不變、不回歸）→ `OrderItem.kt:186-198` 呼叫時帶入 `element.flavorDisplay/additionDisplay(prefs.itemDisplayLan)`。`SideDishLineTest` 補 4 例（空不變 / 只調味 / 只加料 / 兩者），6 測全綠。實機確認附餐調味/加料顯示在卡片 ✅。
 
 ## 處置
 - [x] **缺陷 1：已修（2026-06-17）**。格式採「一律 `- {qty} x 名稱`」（與主項一致）。抽純函式 `middleItemLine(qty,name)`（`Order.kt`）+ `OrderItem.kt:187` 套用 + import；測試 `SideDishLineTest`（qty=1/2，紅→綠）。實機 SM-X710 1.1.6 截圖確認套餐附餐顯示 `- 1 x 名稱`。
