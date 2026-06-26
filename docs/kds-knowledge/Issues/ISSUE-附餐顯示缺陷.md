@@ -1,17 +1,17 @@
 ---
 type: issue
-status: open
+status: done
 created: 2026-06-17
 updated: 2026-06-26
 priority: P1
 tags:
   - type/issue
-  - status/open
+  - status/done
   - priority/P1
 summary: |-
   FLAG:KITCHEN_IMPACT,DISPLAY_GAP
   KEY:OrderItem附餐(GType S/R=isSideDish)只當套餐主項(G/M)的middleDetail渲染｜缺陷1:附餐不顯示數量(OrderItem.kt:187只印"- 名稱",Qty>1會少做)｜缺陷2:孤兒附餐隱形(主項不在同KDS/該單無G主項→filter{!isSideDish}濾掉,OrderItem.kt:130)｜缺陷3:附餐不顯示調味加料(middleDetail渲染OrderItem.kt:186-193只印qty+名稱,主項L133-136才有flavorDisplay/additionDisplay;列印EscPosReceiptBuilder攤平有印→又是card≠print不一致,同缺陷1對稱)
-  DECISION:[2026-06-17]缺陷1已修(附餐帶qty,middleItemLine+SideDishLineTest,實機驗),缺陷2(孤兒隱形)經確認為設定問題已排除非bug｜[2026-06-26]新增缺陷3(附餐調味加料未顯示,實機03單附餐辣/多麵少麵卡片不出)→已修code+test(middleItemLine加flavor/addition參數+OrderItem附餐呼叫帶入,SideDishLineTest 6測綠),1.1.17待實機驗
+  DECISION:[2026-06-17]缺陷1已修(附餐帶qty,middleItemLine+SideDishLineTest,實機驗),缺陷2(孤兒隱形)經確認為設定問題已排除非bug｜[2026-06-26]新增缺陷3(附餐調味加料未顯示,實機03單附餐辣/多麵少麵卡片不出)→已修(middleItemLine加flavor/addition參數+OrderItem附餐呼叫帶入,SideDishLineTest 6測綠),1.1.17實機驗證通過(附餐調味加料顯示在卡片)→結案
 related:
   - "[[Systems/訂單卡片元件]]"
 ---
@@ -49,7 +49,7 @@ for (element in middleList) {
 ## 處置
 - [x] **缺陷 1：已修（2026-06-17）**。格式採「一律 `- {qty} x 名稱`」（與主項一致）。抽純函式 `middleItemLine(qty,name)`（`Order.kt`）+ `OrderItem.kt:187` 套用 + import；測試 `SideDishLineTest`（qty=1/2，紅→綠）。實機 SM-X710 1.1.6 截圖確認套餐附餐顯示 `- 1 x 名稱`。
 - [x] 缺陷 2：**設定問題，已排除**（2026-06-17 使用者確認），非顯示邏輯缺陷，不需改前端。
-- [x] **缺陷 3：已修 code+test**（2026-06-26）。`middleItemLine` 加 flavor/addition 參數 + `OrderItem.kt` 附餐呼叫帶入 + `SideDishLineTest` 補 4 例（6 測綠）。**待實機驗**後結案。
+- [x] **缺陷 3：已修並實機驗證通過**（2026-06-26，1.1.17）。`middleItemLine` 加 flavor/addition 參數 + `OrderItem.kt` 附餐呼叫帶入 + `SideDishLineTest` 補 4 例（6 測綠）。實機確認套餐附餐的調味/加料顯示在卡片上 ✅ → 結案。
 
 ## 相關
 - [[Systems/訂單卡片元件]]
