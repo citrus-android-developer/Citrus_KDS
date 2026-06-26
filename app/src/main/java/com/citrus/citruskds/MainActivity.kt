@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -151,12 +150,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 更版輸入框開關（Activity 層級：讓權限 launcher 回呼也能開，跨 setContent 重組存活）。 */
+    private val updateAsk = mutableStateOf(false)
+
     /** 「未知來源」設定頁返回：已授權則續裝（避免 PERMISSION_NO_CALLBACK 要再按一次）。 */
     private val unknownSourcesLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
                 launchApkInstaller()
             }
+        }
+
+    /**
+     * 下載「前」先索取安裝未知應用程式權限：設定頁返回後直接開更版輸入框。
+     * 把權限閘提前 → 下載完成時權限已就緒，installApk() 直接跳安裝器，
+     * 不再因「下載完才卡權限、auto-resume 不可靠」而要按第二次下載。
+     * 不論授權與否都開輸入框；萬一使用者沒授權，下載後 installApk() 仍有保底導頁。
+     */
+    private val installPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            updateAsk.value = true
         }
 
     /**
@@ -232,8 +245,6 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val homeViewModel = hiltViewModel<CentralViewModel>()
 
-                val updateAsk = remember { mutableStateOf(false) }
-
                 // 語系單一來源：以 languageState 提供更新後的 LocalConfiguration/LocalContext，
                 // 讓整棵 Compose 樹（stringResource 與品項名稱）一致重組
                 //（取代 KdsScreen 的 updateConfiguration 與 SettingPage 的 alpha hack）
@@ -297,7 +308,7 @@ class MainActivity : ComponentActivity() {
                                 navigateToOrderReady = {
                                     navController.navigate("orderReady")
                                 }) {
-                                intentToUpdate(updateAsk)
+                                intentToUpdate()
                             }
                         }
                     }
@@ -315,7 +326,7 @@ class MainActivity : ComponentActivity() {
                         OrderReadyScreen(viewModel = homeViewModel, navigateToSetting = {
                             navController.navigate("setting")
                         }) {
-                            intentToUpdate(updateAsk)
+                            intentToUpdate()
                         }
                     }
 
@@ -373,10 +384,18 @@ class MainActivity : ComponentActivity() {
 
     }
 
-    private fun intentToUpdate(updateAsk: MutableState<Boolean>) {
-        // API 29+ 下載寫入 app 專屬目錄(getExternalFilesDir)，免權限 → 直接開對話框
+    private fun intentToUpdate() {
+        // API 29+ 下載寫入 app 專屬目錄(getExternalFilesDir)，免儲存權限
         // （WRITE_EXTERNAL_STORAGE 在 Android 11+ 無法授予，舊邏輯會讓新機點版號沒反應）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // 下載前先把「安裝未知應用程式」權限要好；返回後 installPermissionLauncher 開輸入框。
+            // 避免「下載完才卡權限、auto-resume 不可靠」導致要按第二次下載才跳安裝器。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                installPermissionLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                )
+                return
+            }
             updateAsk.value = true
             return
         }
