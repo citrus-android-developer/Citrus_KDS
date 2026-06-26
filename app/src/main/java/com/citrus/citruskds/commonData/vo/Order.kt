@@ -77,10 +77,15 @@ val Order.addonItems: List<Detail> get() = detail.filter { it.isPending }
 val Order.buzzerNo: String? get() = note?.removeSuffix("\\")?.trim()?.ifBlank { null }
 
 /**
- * 套餐附餐（middleDetail）顯示行：一律「- {數量} x {名稱}」。
- * 與主項那行格式一致，避免附餐 Qty>1 被當成 1 份漏做（見 ISSUE-附餐顯示缺陷 缺陷1）。
+ * 套餐附餐（middleDetail）顯示行：「- {數量} x {名稱}」，後接可選「\n#{調味}」「\n#{加料}」。
+ * 與主項那行格式一致：避免附餐 Qty>1 漏做（缺陷1），且附餐的調味/加料也要顯示（缺陷3）。
+ * flavor/addition 為空時不附加，格式與舊版完全相同（不回歸）。見 ISSUE-附餐顯示缺陷。
  */
-fun middleItemLine(qty: Int, name: String): String = "- $qty x $name"
+fun middleItemLine(qty: Int, name: String, flavor: String = "", addition: String = ""): String {
+    val f = if (flavor.isBlank()) "" else "\n#$flavor"
+    val a = if (addition.isBlank()) "" else "\n#$addition"
+    return "- $qty x $name$f$a"
+}
 
 /**
  * 卡片顯示用派生狀態：有任何未接(j)→J(新單)；否則有 W→W(製作中)；否則有 O→O(待取)；

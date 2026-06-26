@@ -185,7 +185,13 @@ fun OneLineItemInfo(
             //回圈方式產生text呈現ename
             for (element in middleList) {
                 Text(
-                    text = middleItemLine(element.qty, element.displayName()),
+                    // 缺陷3：附餐也要顯示調味/加料（與主項、列印一致）
+                    text = middleItemLine(
+                        element.qty,
+                        element.displayName(),
+                        element.flavorDisplay(prefs.itemDisplayLan),
+                        element.additionDisplay(prefs.itemDisplayLan),
+                    ),
                     color = ColorBlue,
                     modifier = Modifier
                         .padding(start = 20.dp, top = 10.dp)
