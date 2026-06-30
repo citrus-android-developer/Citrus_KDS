@@ -15,6 +15,7 @@ summary: |-
 verified_by:
   - "[[Verification/2026-06-05_損耗功能端到端]]"
   - "[[Verification/2026-06-08_soldout_remote精簡contract]]"
+  - "[[Verification/2026-06-30_加料第二語言數量]]"
 ---
 # POS-API 端點
 
