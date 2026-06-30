@@ -50,10 +50,7 @@ import com.citrus.citruskds.util.scanner.SunmiScanReceiver
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import android.content.Intent
-import android.net.Uri
 import android.os.Environment
-import android.provider.Settings
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import java.io.File
 import timber.log.Timber
@@ -153,40 +150,14 @@ class MainActivity : ComponentActivity() {
     /** 更版輸入框開關（Activity 層級：讓權限 launcher 回呼也能開，跨 setContent 重組存活）。 */
     private val updateAsk = mutableStateOf(false)
 
-    /** 「未知來源」設定頁返回：已授權則續裝（避免 PERMISSION_NO_CALLBACK 要再按一次）。 */
-    private val unknownSourcesLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
-                launchApkInstaller()
-            }
-        }
-
-    /**
-     * 下載「前」先索取安裝未知應用程式權限：設定頁返回後直接開更版輸入框。
-     * 把權限閘提前 → 下載完成時權限已就緒，installApk() 直接跳安裝器，
-     * 不再因「下載完才卡權限、auto-resume 不可靠」而要按第二次下載。
-     * 不論授權與否都開輸入框；萬一使用者沒授權，下載後 installApk() 仍有保底導頁。
-     */
-    private val installPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            updateAsk.value = true
-        }
-
     /**
      * 下載完成後啟動系統安裝器安裝新版 APK。
-     * Android 8+ 未授予「未知來源」時先導去設定頁，返回後自動續裝。
+     * 直接交給系統 PackageInstaller（同 CompassKiosk 證實可行寫法）：未知來源未授權時，
+     * 由系統安裝器 UI 內聯處理授權，App **不**自行攔 `canRequestPackageInstalls` 後 return。
+     * 舊寫法 App 端攔截 + return + 不可靠的 auto-resume 會造成「下載完進度條消失卻沒安裝、
+     * 要再輸入版號下載一次」（第一次被吃掉）。
      */
     private fun installApk() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-            unknownSourcesLauncher.launch(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-            )
-            return
-        }
-        launchApkInstaller()
-    }
-
-    private fun launchApkInstaller() {
         val file = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), APK_FILE_NAME)
         if (!file.exists()) {
             Timber.e("安裝失敗：APK 不存在 ${file.absolutePath}")
@@ -388,14 +359,7 @@ class MainActivity : ComponentActivity() {
         // API 29+ 下載寫入 app 專屬目錄(getExternalFilesDir)，免儲存權限
         // （WRITE_EXTERNAL_STORAGE 在 Android 11+ 無法授予，舊邏輯會讓新機點版號沒反應）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // 下載前先把「安裝未知應用程式」權限要好；返回後 installPermissionLauncher 開輸入框。
-            // 避免「下載完才卡權限、auto-resume 不可靠」導致要按第二次下載才跳安裝器。
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-                installPermissionLauncher.launch(
-                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-                )
-                return
-            }
+            // 直接開更版輸入框；安裝權限交由系統安裝器內聯處理（見 installApk）。
             updateAsk.value = true
             return
         }
