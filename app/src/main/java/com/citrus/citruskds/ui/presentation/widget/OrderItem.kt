@@ -27,6 +27,7 @@ import com.citrus.citruskds.R
 import com.citrus.citruskds.commonData.vo.Detail
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.additionDisplay
+import com.citrus.citruskds.commonData.vo.comboTaggedName
 import com.citrus.citruskds.commonData.vo.buzzerNo
 import com.citrus.citruskds.commonData.vo.displayStatus
 import com.citrus.citruskds.commonData.vo.flavorDisplay
@@ -136,7 +137,7 @@ fun OrderItem(
                 val add = if (addStr.isBlank()) "" else "\n#$addStr"
 
                 OneLineItemInfo(
-                    data.displayName(),
+                    comboTaggedName(data.isComboMain, data.displayName()),
                     data.qty.toString(),
                     flavor,
                     add,

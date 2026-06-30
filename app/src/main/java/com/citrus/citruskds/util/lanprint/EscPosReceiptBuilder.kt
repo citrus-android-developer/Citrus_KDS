@@ -2,6 +2,7 @@ package com.citrus.citruskds.util.lanprint
 
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.additionDisplay
+import com.citrus.citruskds.commonData.vo.comboTaggedName
 import com.citrus.citruskds.commonData.vo.flavorDisplay
 import com.citrus.citruskds.commonData.vo.isComboMain
 import com.citrus.citruskds.di.prefs
@@ -61,8 +62,9 @@ object EscPosReceiptBuilder {
             val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
             val addStr = d.additionDisplay(prefs.itemDisplayLan)
             val add = if (addStr.isBlank()) "" else "\n#$addStr"
-            // 套餐主項(GType G/M)只印名稱、不印數量；其餘正常印「數量 x 名稱」
-            val line = if (d.isComboMain) name + flavor + add else "${d.qty} x " + name + flavor + add
+            // 套餐主項(GType G/M)只印名稱(前綴 []標記)、不印數量；其餘正常印「數量 x 名稱」
+            val taggedName = comboTaggedName(d.isComboMain, name)
+            val line = if (d.isComboMain) taggedName + flavor + add else "${d.qty} x " + taggedName + flavor + add
             text(out, line + "\n")
         }
 

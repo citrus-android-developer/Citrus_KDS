@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.citrus.citruskds.commonData.vo.Order
 import com.citrus.citruskds.commonData.vo.flavorDisplay
+import com.citrus.citruskds.commonData.vo.comboTaggedName
 import com.citrus.citruskds.commonData.vo.isComboMain
 import com.citrus.citruskds.commonData.vo.nameDisplay
 import com.citrus.citruskds.di.prefs
@@ -84,8 +85,8 @@ fun ServedItem(modifier: Modifier, order: Order, featureBtn: @Composable (Int) -
                         val flavorStr = order.detail[index].flavorDisplay(prefs.itemDisplayLan)
                         val flavor = if (flavorStr.isBlank()) "" else "\n#$flavorStr"
                         Text(
-                            // 套餐主項(G/M)只顯示名稱、不顯示數量
-                            text = (if (order.detail[index].isComboMain) "" else "${order.detail[index].qty} x ") + name + flavor,
+                            // 套餐主項(G/M)只顯示名稱(前綴 []標記)、不顯示數量
+                            text = (if (order.detail[index].isComboMain) "" else "${order.detail[index].qty} x ") + comboTaggedName(order.detail[index].isComboMain, name) + flavor,
                             color = ColorBlue,
                             modifier = Modifier
                                 .fillMaxWidth()
