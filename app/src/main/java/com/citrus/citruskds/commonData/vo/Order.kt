@@ -106,11 +106,12 @@ fun Order.displayStatus(): String {
 val Detail.isComboMain: Boolean get() = gType == "G" || gType == "M"
 
 /**
- * 套餐主餐(G/M)的顯示/列印名稱：前綴 "[]" 標記，讓套餐主項在卡片與收據都一眼可辨。
+ * 套餐主餐(G/M)的顯示/列印名稱：前綴 "□" 標記，讓套餐主項在卡片與收據都一眼可辨。
  * 一般品項與附餐原樣回傳。顯示(卡片/已出餐/全品項)與列印共用，避免路徑分歧。
+ * 注意：□(U+25A1) 在 GBK 為 A1F5，熱感收據(GBK 編碼)可正常印出。
  */
 fun comboTaggedName(isComboMain: Boolean, name: String): String =
-    if (isComboMain) "[]$name" else name
+    if (isComboMain) "□$name" else name
 
 /** 套餐附餐（GType S/R）：M 套餐附餐為 S、G 套餐附餐為 R */
 val Detail.isSideDish: Boolean get() = gType == "S" || gType == "R"
