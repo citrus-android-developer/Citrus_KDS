@@ -2,7 +2,7 @@
 type: system
 status: done
 created: 2026-05-13
-updated: 2026-06-24
+updated: 2026-06-30
 tags:
   - type/system
   - status/done
@@ -124,6 +124,7 @@ UI 層 `collect` 時用 `when (result)` 做分支。
 ### 訂單明細擴充（OrdersList，加點+雙語用）
 - Detail 新增 `ItemStatus`（per-item，判斷加點）。
 - 加料/調味第二語言：原抓 OrdersItem.FlavorDesc2/AddGName2（多空），改 **JOIN 主檔**：調味 `product.dbo.Flavor.Gname2`(對 FlavorID)、加料 `product.dbo.Goods.GName2`(對 AddGID, GKID=10)；第一語言仍用 OrdersItem。
+- ⚠️ **2026-06-30 修加料第二語言掉數量**：加料數量(`*N`)只存在第一語言 `AddGName`(如 `多牛奶*1`);第二語言 `AddGName2`=`Goods.GName2` 是純品名(`milk more`)→**英文顯示模式掉加料數量**(卡片+列印都走 `additionDisplay`)。修:後端 `AppendAddQty(AddGName, AddGName2)` 取第一語言結尾 `*數字` 補到 Addition2(單一加料;複合加料 AddGName2 本為 null→前端 fallback 第一語言已含數量)。後端單獨修、前端不用動,本機驗 `milk more*1`/`onion more*6`。`KitchenDisplayDAL.cs` AppendAddQty + 行122。
 - ⚠️ **2026-06-24 修 row 乘出 bug**：上面調味 JOIN 原本只比 `F.FlavorID = I.FlavorID`（類別），但套餐附餐常帶調味**類別**(Sauce/SUGAR OPTIONS)卻沒選具體值(`FlavorDesc=''`)→ 對到該類別**所有選項**(Sauce 2/SUGAR 3)，GROUP BY 含 `F.Gname2` → **附餐在 KDS 重複顯示**(廚房多做)。修:JOIN 加比具體值 `AND F.[Desc] = I.[FlavorDesc]`(main+served/recall 兩分支)；沒選調味→不對應不乘、有選→精準翻。後端單獨修(前端忠實渲染、不用動)，本機驗 4號單 6→3筆。`KitchenDisplayDAL.cs:39,55`。
 
 ### SetStatus 來源狀態感知
